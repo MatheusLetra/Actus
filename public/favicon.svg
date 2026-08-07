@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Gradiente Roxo do Fundo -->
+    <radialGradient id="purpleBg" cx="50%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#8a2be2" />
+      <stop offset="45%" stop-color="#5a189a" />
+      <stop offset="80%" stop-color="#240046" />
+      <stop offset="100%" stop-color="#12002b" />
+    </radialGradient>
+
+    <!-- Overlay de Iluminação -->
+    <linearGradient id="topGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18" />
+      <stop offset="40%" stop-color="#ffffff" stop-opacity="0" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.35" />
+    </linearGradient>
+
+    <!-- Brilho Neon da Chama -->
+    <filter id="flameGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Fundo do Ícone (Squircle) -->
+  <rect x="32" y="32" width="448" height="448" rx="100" ry="100" fill="url(#purpleBg)" />
+  <rect x="32" y="32" width="448" height="448" rx="100" ry="100" fill="url(#topGlow)" />
+
+  <!-- Traçado Contínuo da Chama -->
+  <path 
+    d="M 266 128
+       C 272 170 342 215 342 292
+       C 342 348 298 384 256 384
+       C 214 384 170 348 170 292
+       C 170 252 195 238 195 238
+       C 188 266 208 280 225 274
+       C 242 268 229 225 226 195
+       C 223 165 258 135 266 128 Z" 
+    fill="none" 
+    stroke="#ffffff" 
+    stroke-width="20" 
+    stroke-linecap="round" 
+    stroke-linejoin="round" 
+    filter="url(#flameGlow)"
+  />
+</svg>
