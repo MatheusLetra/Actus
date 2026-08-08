@@ -46,6 +46,30 @@ export const completionRepository = {
     return { completions: updated, completed };
   },
 
+  complete(habitId: string, date: string): HabitCompletion[] {
+    const list = this.getAll();
+    const existingIndex = list.findIndex((c) => c.habitId === habitId && c.date === date);
+
+    if (existingIndex >= 0) {
+      const existing = list[existingIndex];
+      if (existing.completed) return list;
+      const updated = [...list];
+      updated[existingIndex] = { ...existing, completed: true };
+      this.saveAll(updated);
+      return updated;
+    }
+
+    const newCompletion: HabitCompletion = {
+      id: `c_${habitId}_${date}`,
+      habitId,
+      date,
+      completed: true,
+    };
+    const updated = [...list, newCompletion];
+    this.saveAll(updated);
+    return updated;
+  },
+
   deleteByHabitId(habitId: string): HabitCompletion[] {
     const list = this.getAll();
     const updated = list.filter((c) => c.habitId !== habitId);

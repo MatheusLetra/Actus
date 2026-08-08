@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import type { Category, CategoryStat, DashboardStats, Habit, HabitCompletion } from '@/types';
+import type { Category, CategoryStat, DashboardStats, Habit, HabitCompletion, PomodoroSession, PomodoroSettings, PomodoroStats } from '@/types';
 import { categoryRepository } from '@/repositories/categoryRepository';
 import { habitRepository } from '@/repositories/habitRepository';
 import { completionRepository } from '@/repositories/completionRepository';
+import { pomodoroRepository } from '@/repositories/pomodoroRepository';
 import { seedService } from '@/services/seedService';
 import { statisticsService } from '@/services/statisticsService';
+import { pomodoroService } from '@/services/pomodoroService';
 import { dateService } from '@/services/dateService';
 
 interface HabitContextType {
@@ -27,6 +29,17 @@ interface HabitContextType {
   
   // Completion Actions
   toggleHabitCompletion: (habitId: string, dateStr?: string) => { completed: boolean };
+  completeHabitCompletion: (habitId: string, dateStr?: string) => void;
+  
+  // Pomodoro State & Actions
+  pomodoroSettings: PomodoroSettings;
+  pomodoroSessions: PomodoroSession[];
+  pomodoroStats: PomodoroStats;
+  updatePomodoroSettings: (settings: PomodoroSettings) => void;
+  createPomodoroSession: (session: Omit<PomodoroSession, 'id'>) => PomodoroSession;
+  updatePomodoroSession: (id: string, updates: Partial<Omit<PomodoroSession, 'id'>>) => void;
+  removePomodoroSession: (id: string) => void;
+  clearPomodoroSessions: () => void;
   
   // Admin / Seed Actions
   resetToDemoData: () => void;
@@ -40,6 +53,8 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [categories, setCategories] = useState<Category[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
+  const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(pomodoroService.getDefaultSettings());
+  const [pomodoroSessions, setPomodoroSessions] = useState<PomodoroSession[]>([]);
 
   // Initialize data on mount
   useEffect(() => {
@@ -53,6 +68,8 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setHabits(habitRepository.getAll());
       setCompletions(completionRepository.getAll());
     }
+    setPomodoroSettings(pomodoroRepository.getSettings());
+    setPomodoroSessions(pomodoroRepository.getAll());
   }, []);
 
   // Compute Dashboard Stats reactively
@@ -64,6 +81,11 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const categoryStats = useMemo(() => {
     return statisticsService.getCategoryStats(categories, habits, completions);
   }, [categories, habits, completions]);
+
+  // Compute Pomodoro Stats reactively
+  const pomodoroStats = useMemo(() => {
+    return pomodoroService.getPomodoroStats(pomodoroSessions, habits);
+  }, [pomodoroSessions, habits]);
 
   // Category Operations
   const addCategory = (cat: Omit<Category, 'id' | 'createdAt'>) => {
@@ -129,6 +151,39 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return { completed: result.completed };
   };
 
+  const completeHabitCompletion = (habitId: string, dateStr = dateService.getTodayString()) => {
+    const updated = completionRepository.complete(habitId, dateStr);
+    setCompletions(updated);
+  };
+
+  // Pomodoro Operations
+  const updatePomodoroSettings = (settings: PomodoroSettings) => {
+    pomodoroRepository.saveSettings(settings);
+    setPomodoroSettings(settings);
+  };
+
+  const createPomodoroSession = (session: Omit<PomodoroSession, 'id'>): PomodoroSession => {
+    const newSession: PomodoroSession = { ...session, id: `pomo_${Date.now()}` };
+    const updated = pomodoroRepository.add(newSession);
+    setPomodoroSessions(updated);
+    return newSession;
+  };
+
+  const updatePomodoroSession = (id: string, updates: Partial<Omit<PomodoroSession, 'id'>>) => {
+    const updated = pomodoroRepository.update(id, updates);
+    setPomodoroSessions(updated);
+  };
+
+  const removePomodoroSession = (id: string) => {
+    const updated = pomodoroRepository.remove(id);
+    setPomodoroSessions(updated);
+  };
+
+  const clearPomodoroSessions = () => {
+    const updated = pomodoroRepository.clear();
+    setPomodoroSessions(updated);
+  };
+
   // Reset to Demo
   const resetToDemoData = () => {
     const data = seedService.seedDemoData();
@@ -139,7 +194,11 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Backup & Restore
   const exportData = () => {
-    return JSON.stringify({ categories, habits, completions, version: 1 }, null, 2);
+    return JSON.stringify(
+      { categories, habits, completions, pomodoroSettings, pomodoroSessions, version: 2 },
+      null,
+      2
+    );
   };
 
   const importData = (jsonStr: string): boolean => {
@@ -152,6 +211,24 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setCategories(parsed.categories);
         setHabits(parsed.habits);
         setCompletions(parsed.completions);
+
+        if (Array.isArray(parsed.pomodoroSessions)) {
+          pomodoroRepository.saveAll(parsed.pomodoroSessions);
+          setPomodoroSessions(parsed.pomodoroSessions);
+        }
+
+        if (
+          parsed.pomodoroSettings &&
+          typeof parsed.pomodoroSettings === 'object' &&
+          Number.isFinite(parsed.pomodoroSettings.focusMinutes)
+        ) {
+          const validation = pomodoroService.validateSettings(parsed.pomodoroSettings);
+          if (validation.valid) {
+            pomodoroRepository.saveSettings(parsed.pomodoroSettings);
+            setPomodoroSettings(parsed.pomodoroSettings);
+          }
+        }
+
         return true;
       }
       return false;
@@ -176,6 +253,15 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         deleteHabit,
         toggleHabitActive,
         toggleHabitCompletion,
+        completeHabitCompletion,
+        pomodoroSettings,
+        pomodoroSessions,
+        pomodoroStats,
+        updatePomodoroSettings,
+        createPomodoroSession,
+        updatePomodoroSession,
+        removePomodoroSession,
+        clearPomodoroSessions,
         resetToDemoData,
         exportData,
         importData,

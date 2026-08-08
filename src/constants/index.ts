@@ -1,10 +1,26 @@
+import type { PomodoroCycleType } from '@/types';
+
 export const STORAGE_KEYS = {
   habits: 'actus:habits',
   categories: 'actus:categories',
   completions: 'actus:completions',
   theme: 'actus:theme',
   initialized: 'actus:initialized',
+  pomodoroSettings: 'actus:pomodoroSettings',
+  pomodoroSessions: 'actus:pomodoroSessions',
 } as const;
+
+export const POMODORO_CYCLE_LABELS: Record<PomodoroCycleType, string> = {
+  focus: 'Foco',
+  shortBreak: 'Pausa Curta',
+  longBreak: 'Pausa Longa',
+};
+
+export const POMODORO_DISTRIBUTION_COLORS: Record<PomodoroCycleType, string> = {
+  focus: '#8b5cf6',
+  shortBreak: '#10b981',
+  longBreak: '#3b82f6',
+};
 
 export const AVAILABLE_ICONS = [
   'Heart',

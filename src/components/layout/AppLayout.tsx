@@ -9,6 +9,8 @@ const TITLE_MAP: Record<string, string> = {
   '/categories': 'Categorias',
   '/history': 'Histórico de Conclusões',
   '/settings': 'Configurações & Dados',
+  '/tools': 'Ferramentas Úteis',
+  '/tools/pomodoro': 'Pomodoro',
 };
 
 export const AppLayout: React.FC = () => {

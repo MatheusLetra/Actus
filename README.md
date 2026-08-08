@@ -4,6 +4,8 @@ Uma aplicação web completa, moderna e responsiva (Mobile-First) para **cadastr
 
 A aplicação funciona **100% no navegador (offline-first)**, com persistência total via `localStorage`.
 
+Inclui também um menu de **Ferramentas Úteis** com o **Pomodoro**: timer de foco/pausas totalmente configurável, vínculo opcional com hábitos cadastrados, registro automático de ciclos, notificações sonoras/visuais ao final do tempo e gráficos de desempenho.
+
 ---
 
 ## 🚀 Tecnologias Utilizadas
@@ -12,7 +14,8 @@ A aplicação funciona **100% no navegador (offline-first)**, com persistência 
 * **Estilização**: Tailwind CSS v4, Lucide React (ícones), Shadcn/UI Components
 * **Roteamento**: React Router DOM 7
 * **Gráficos**: Recharts 3
-* **Testes**: Vitest (testes unitários para serviços e algoritmos de streak)
+* **Notificações & Áudio**: Web Notifications API e Web Audio (com arquivo de som em `public/`)
+* **Testes**: Vitest (testes unitários para serviços e algoritmos de streak/pomodoro)
 
 ---
 
@@ -56,19 +59,23 @@ O projeto segue princípios estritos de **Clean Code, SOLID, Single Responsibili
 
 ```text
 src/
-├── types/                # Interfaces estritas (Habit, Category, Completion, Stats)
-├── constants/            # Lista de ícones, cores, chaves de localStorage e dias da semana
+├── types/                # Interfaces estritas (Habit, Category, Completion, Stats, Pomodoro)
+├── constants/            # Lista de ícones, cores, chaves de localStorage, dias da semana e labels do pomodoro
 ├── utils/                # Utilitários de merge de classes CSS (cn)
 ├── services/             # Regras de negócio puras (isoladas da UI)
 │   ├── dateService.ts    # Operações de data timezone-safe (YYYY-MM-DD)
 │   ├── streakService.ts  # Algoritmo de cálculo de streaks e taxas
 │   ├── statisticsService.ts # Agrupamentos de analytics e gráficos
-│   └── seedService.ts    # Carga de dados iniciais de demonstração
+│   ├── seedService.ts    # Carga de dados iniciais de demonstração
+│   └── pomodoroService.ts # Lógica do pomodoro (settings, sequência de fases, stats de ciclos)
+│   ├── notificationService.ts # Notificações do navegador (helper de browser)
+│   └── audioService.ts   # Som de alerta (helper de browser)
 ├── repositories/         # Camada de persistência desacoplada
 │   ├── storageService.ts # Wrapper seguro sobre localStorage com try/catch
 │   ├── habitRepository.ts
 │   ├── categoryRepository.ts
-│   └── completionRepository.ts
+│   ├── completionRepository.ts
+│   └── pomodoroRepository.ts
 ├── context/              # Gerenciamento de estado reativo (ThemeContext, HabitContext)
 ├── components/
 │   ├── ui/               # Building blocks do Shadcn/UI (Button, Card, Dialog, Progress, Switch, Sheet, etc.)
@@ -77,11 +84,14 @@ src/
 │   ├── dashboard/        # TodayHabitItem
 │   ├── habits/           # HabitCard, HabitFormDialog, CalendarHeatmap
 │   ├── categories/       # CategoryCard, CategoryFormDialog
-│   └── charts/           # Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart
+│   ├── pomodoro/         # PomodoroTimer, PomodoroSettingsForm, PomodoroSessionLog, usePomodoroTimer
+│   └── charts/           # Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart, PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
 ├── pages/
 │   ├── Dashboard/        # Visão geral de métricas e hábitos do dia
 │   ├── Habits/           # CRUD e listagem de hábitos com filtros
 │   ├── Categories/       # CRUD de categorias com proteção contra exclusão
+│   ├── Tools/            # Menu de Ferramentas Úteis
+│   ├── Pomodoro/         # Timer + configurações + histórico + gráficos de ciclos
 │   ├── History/          # Log histórico e filtros por período
 │   └── Settings/         # Escolha de temas (Claro/Escuro/Sistema) e Backup JSON
 ├── routes/               # Configuração do React Router
@@ -99,6 +109,8 @@ As chaves são centralizadas:
 * `actus:categories`: Lista de categorias
 * `actus:completions`: Histórico de conclusões por data (`YYYY-MM-DD`)
 * `actus:theme`: Preferência de tema (`light` | `dark` | `system`)
+* `actus:pomodoroSettings`: Configurações do pomodoro (durações, auto-início, notificações/som, hábito vinculado)
+* `actus:pomodoroSessions`: Ciclos de pomodoro registrados (foco, pausas e sessão ativa/pausada)
 
 Caso o `localStorage` contenha dados corrompidos, o `storageService` intercepta e retorna fallbacks seguros sem quebrar a aplicação.
 
@@ -113,6 +125,18 @@ As regras de streak são puras e não dependem do React:
 
 ---
 
+## ⏱️ Ferramenta Pomodoro
+
+Acessível pelo menu **Ferramentas** na Sidebar. Principais funções:
+
+1. **Timer configurável**: durações de foco, pausa curta e pausa longa (com intervalo de pausa longa a cada N ciclos), auto-início de foco/pausas, e vínculo opcional a um hábito cadastrado.
+2. **Notificações ao final do tempo**: alerta do navegador (Web Notifications) e som (`public/pomodoro-chime.wav`, com fallback via Web Audio) — ambos configuráveis.
+3. **Registro automático de ciclos**: todo foco concluído é registrado no histórico; se houver hábito vinculado, sua conclusão é marcada na data (respeitando o agendamento do hábito).
+4. **Pausar e concluir depois**: o ciclo pausado é persistido (tempo restante) no `localStorage`; ao voltar, é possível retomar ou concluir manualmente.
+5. **Gráficos de métricas**: ciclos de foco nos últimos 30 dias, distribuição entre foco/pausas e comparação de focos por hábito vinculado.
+
+---
+
 ## 🧪 Testes Unitários
 
 Para executar a suíte de testes:
@@ -123,3 +147,4 @@ npm run test:run
 Os testes cobrem:
 * Manipulação e formatação de datas (`dateService.test.ts`)
 * Algoritmo de streaks e sequência histórica (`streakService.test.ts`)
+* Lógica do pomodoro: validação de settings, durações, sequência de fases e agregação de stats (`pomodoroService.test.ts`)

@@ -6,6 +6,8 @@ import { HabitsPage } from '@/pages/Habits';
 import { CategoriesPage } from '@/pages/Categories';
 import { HistoryPage } from '@/pages/History';
 import { SettingsPage } from '@/pages/Settings';
+import { ToolsPage } from '@/pages/Tools';
+import { PomodoroPage } from '@/pages/Pomodoro';
 
 const router = createBrowserRouter([
   {
@@ -31,6 +33,14 @@ const router = createBrowserRouter([
       {
         path: 'settings',
         element: <SettingsPage />,
+      },
+      {
+        path: 'tools',
+        element: <ToolsPage />,
+      },
+      {
+        path: 'tools/pomodoro',
+        element: <PomodoroPage />,
       },
     ],
   },

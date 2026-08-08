@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, FolderHeart, History, Settings, Flame } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, FolderHeart, History, Settings, Flame, Wrench } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useHabits } from '@/context/HabitContext';
 
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/habits', label: 'Hábitos', icon: CheckSquare },
   { path: '/categories', label: 'Categorias', icon: FolderHeart },
+  { path: '/tools', label: 'Ferramentas', icon: Wrench },
   { path: '/history', label: 'Histórico', icon: History },
   { path: '/settings', label: 'Configurações', icon: Settings },
 ];

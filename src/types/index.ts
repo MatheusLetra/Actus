@@ -67,3 +67,61 @@ export interface HabitWithStats extends Habit {
 }
 
 export type DateFilterOption = 'today' | 'last7' | 'last30' | 'thisMonth' | 'custom';
+
+export type PomodoroCycleType = 'focus' | 'shortBreak' | 'longBreak';
+export type PomodoroSessionStatus = 'running' | 'paused' | 'completed' | 'cancelled';
+
+export interface PomodoroSettings {
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  longBreakInterval: number;
+  autoStartBreaks: boolean;
+  autoStartFocus: boolean;
+  notificationsEnabled: boolean;
+  soundEnabled: boolean;
+  linkedHabitId?: string | null;
+}
+
+export interface PomodoroSession {
+  id: string;
+  habitId?: string | null;
+  cycleType: PomodoroCycleType;
+  plannedSeconds: number;
+  remainingSeconds: number;
+  status: PomodoroSessionStatus;
+  startedAt: string;
+  completedAt?: string;
+  date: string;
+}
+
+export interface PomodoroByHabitStat {
+  habitId: string;
+  habitName: string;
+  cycles: number;
+  focusSeconds: number;
+}
+
+export interface PomodoroDailyStat {
+  date: string;
+  label: string;
+  cycles: number;
+  focusMinutes: number;
+}
+
+export interface PomodoroDistributionStat {
+  cycleType: PomodoroCycleType;
+  label: string;
+  count: number;
+}
+
+export interface PomodoroStats {
+  totalCycles: number;
+  totalFocusCycles: number;
+  totalFocusSeconds: number;
+  totalFocusMinutes: number;
+  todayFocusCycles: number;
+  byHabit: PomodoroByHabitStat[];
+  dailySeries: PomodoroDailyStat[];
+  distribution: PomodoroDistributionStat[];
+}
