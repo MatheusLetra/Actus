@@ -6,7 +6,7 @@ A aplicação funciona **100% no navegador (offline-first)**, com persistência 
 
 Inclui também um menu de **Ferramentas Úteis** com o **Pomodoro** e o **Quadro Kanban**: timer de foco/pausas totalmente configurável com vínculo opcional de hábitos/tarefas e registro automático de ciclos; quadro de tarefas com colunas personalizáveis, drag and drop e integração com o Pomodoro.
 
-Há ainda uma **sincronização opcional com a nuvem**: ao entrar com a conta **Google**, seus dados (localStorage + Cloud Firestore) são mesclados e sincronizados automaticamente entre dispositivos, sem perder nenhum dado local. Credenciais via arquivo `.env`.
+Há ainda uma **sincronização opcional com a nuvem**: ao entrar com a conta **Google**, seus dados (localStorage + Cloud Firestore) são mesclados e sincronizados automaticamente entre dispositivos, sem perder nenhum dado local. Alterações, inclusões e exclusões (como desmarcar um hábito ou apagar um registro) são propagadas entre todos os dispositivos. Credenciais via arquivo `.env`.
 
 ---
 
@@ -75,7 +75,7 @@ src/
 │   ├── seedService.ts    # Carga de dados iniciais de demonstração
 │   ├── pomodoroService.ts # Lógica do pomodoro (settings, sequência de fases, stats de ciclos)
 │   ├── kanbanService.ts  # Lógica do kanban (defaults, validação, ordenação, moveTask, stats)
-│   └── syncMergeService.ts # Merge de snapshots (união + last-writer-wins) para sincronização
+│   └── syncMergeService.ts # Merge de snapshots (união + last-writer-wins + tombstones de exclusão) para sincronização
 │   ├── notificationService.ts # Notificações do navegador (helper de browser)
 │   └── audioService.ts   # Som de alerta (helper de browser)
 │   └── firebase/         # config.ts, authService.ts, syncService.ts (helpers de browser — não puros)
@@ -85,7 +85,8 @@ src/
 │   ├── categoryRepository.ts
 │   ├── completionRepository.ts
 │   ├── pomodoroRepository.ts
-│   └── kanbanRepository.ts
+│   ├── kanbanRepository.ts
+│   └── tombstoneRepository.ts # Marcas de exclusão propagadas na sincronização
 ├── context/              # Gerenciamento de estado reativo (ThemeContext, HabitContext, FirebaseContext)
 ├── components/
 │   ├── ui/               # Building blocks do Shadcn/UI (Button, Card, Dialog, Progress, Switch, Sheet, etc.)
@@ -127,12 +128,13 @@ As chaves são centralizadas:
 * `actus:kanbanBoard`: Quadro kanban (nome/cor)
 * `actus:kanbanColumns`: Colunas do quadro kanban
 * `actus:kanbanTasks`: Tarefas do quadro kanban
+* `actus:tombstones`: Marcas de exclusão (usadas pela sincronização para propagar deleções/desmarcações)
 * `actus:syncUser`: Conta Google conectada (quando a sincronização está ativa)
 * `actus:lastSyncAt`: Data/hora da última sincronização bem-sucedida
 
 Caso o `localStorage` contenha dados corrompidos, o `storageService` intercepta e retorna fallbacks seguros sem quebrar a aplicação.
 
-A sincronização com o Firebase (quando ativa) usa o `syncMergeService` para **mesclar** os dados locais com os da nuvem na conta do usuário — hábitos, categorias, conclusões, pomodoro e kanban são unificados por item (nada é sobrescrito em massa) e participados por mês no Firestore para respeitar os limites de tamanho de documento.
+A sincronização com o Firebase (quando ativa) usa o `syncMergeService` para **mesclar** os dados locais com os da nuvem na conta do usuário — hábitos, categorias, conclusões, pomodoro e kanban são unificados por item (nada é sobrescrito em massa) e participados por mês no Firestore para respeitar os limites de tamanho de documento. Exclusões (apagar hábito/categoria/registro ou desmarcar uma conclusão) ficam gravadas como **tombstones**, garantindo que a remoção também se propague para os demais dispositivos.
 
 ---
 
@@ -174,9 +176,10 @@ Acessível pela tela **Configurações** (card "Sincronização com a Nuvem"). F
 
 1. **Login com Google**: Firebase Authentication (`signInWithPopup`); a sessão é restaurada automaticamente entre visitas. Sem credenciais no `.env`, o card fica oculto e o app continua 100% local.
 2. **Mescla, não sobrescreve**: ao entrar, os dados do dispositivo são **mesclados** com os dados da conta (`syncMergeService` — união por item com "quem editou por último vence"). Nenhum dado local é perdido; em um novo dispositivo, os dados da nuvem são baixados para o localStorage.
-3. **Sincronização automática e bidirecional**: toda alteração local é enviada à nuvem (com debounce); alterações feitas em outro dispositivo são aplicadas em tempo real (`onSnapshot`), com proteção contra loops de escrita.
-4. **Armazenamento no Firestore**: um documento por usuário (`users/{uid}`) com as coleções que crescem (`completions`, `pomodoroSessions`) particionadas por mês.
-5. **Controles**: botões "Sincronizar agora" (manual) e "Sair da conta" (os dados do dispositivo permanecem intactos).
+3. **Deleções propagam**: apagar um hábito/categoria/registro ou **desmarcar uma conclusão** gera um *tombstone* (marca de exclusão). A remoção é propagada a todos os dispositivos; uma nova marcação (re-marcar) revoga a exclusão e volta a sincronizar.
+4. **Sincronização automática e bidirecional**: toda alteração local é enviada à nuvem (com debounce); alterações feitas em outro dispositivo são aplicadas em tempo real (`onSnapshot`), com proteção contra loops de escrita.
+5. **Armazenamento no Firestore**: um documento por usuário (`users/{uid}`) com as coleções que crescem (`completions`, `pomodoroSessions`) particionadas por mês.
+6. **Controles**: botões "Sincronizar agora" (manual) e "Sair da conta" (os dados do dispositivo permanecem intactos).
 
 > Pré-requisito (console do Firebase): habilitar Google Authentication, criar o banco Firestore e aplicar as regras de segurança que restringem o acesso por UID — exemplo em `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md`.
 
@@ -194,4 +197,4 @@ Os testes cobrem:
 * Algoritmo de streaks e sequência histórica (`streakService.test.ts`)
 * Lógica do pomodoro: validação de settings, durações, sequência de fases e agregação de stats (`pomodoroService.test.ts`)
 * Lógica do kanban: defaults, validação, ordenação/reindexação e movimentação de tarefas (`kanbanService.test.ts`)
-* Lógica de sincronização: merge de snapshots, união por item e resolução de conflitos (`syncMergeService.test.ts`)
+* Lógica de sincronização: merge de snapshots, união por item, resolução de conflitos e propagação de exclusões via tombstones (`syncMergeService.test.ts`)

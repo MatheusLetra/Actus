@@ -7,6 +7,8 @@ import type {
   KanbanTask,
   PomodoroSession,
   PomodoroSettings,
+  SyncTombstone,
+  TombstoneKind,
 } from '@/types';
 import { kanbanService } from './kanbanService';
 import { pomodoroService } from './pomodoroService';
@@ -21,6 +23,7 @@ export interface ActusData {
   kanbanBoard: KanbanBoard;
   kanbanColumns: KanbanColumn[];
   kanbanTasks: KanbanTask[];
+  tombstones: SyncTombstone[];
 }
 
 export interface ActusSnapshot extends ActusData {
@@ -65,13 +68,80 @@ function mergeById<T extends { id: string }>(
 function mergeCompletions(local: HabitCompletion[], remote: HabitCompletion[]): HabitCompletion[] {
   const map = new Map<string, HabitCompletion>();
   const key = (c: HabitCompletion) => `${c.habitId}|${c.date}`;
+  const stamp = (c: HabitCompletion) => toMilliseconds(c.updatedAt) || 0;
   for (const c of local) map.set(key(c), c);
   for (const c of remote) {
     const k = key(c);
     const existing = map.get(k);
-    if (!existing || (!existing.completed && c.completed)) map.set(k, c);
+    if (!existing) {
+      map.set(k, c);
+      continue;
+    }
+    if (existing.completed !== c.completed) {
+      if (c.completed) map.set(k, c);
+      continue;
+    }
+    if (stamp(c) > stamp(existing)) map.set(k, c);
   }
   return Array.from(map.values());
+}
+
+const TOMBSTONE_KEY = (t: SyncTombstone) => `${t.kind}|${t.id}`;
+
+function mergeTombstones(local: SyncTombstone[], remote: SyncTombstone[]): SyncTombstone[] {
+  const map = new Map<string, SyncTombstone>();
+  for (const t of local) {
+    const key = TOMBSTONE_KEY(t);
+    const existing = map.get(key);
+    if (!existing || t.deletedAt > existing.deletedAt) map.set(key, t);
+  }
+  for (const t of remote) {
+    const key = TOMBSTONE_KEY(t);
+    const existing = map.get(key);
+    if (!existing || t.deletedAt > existing.deletedAt) map.set(key, t);
+  }
+  return Array.from(map.values());
+}
+
+function toPerItemStamp(item: {
+  updatedAt?: string;
+  completedAt?: string;
+  startedAt?: string;
+  createdAt?: string;
+}): number {
+  return (
+    toMilliseconds(item.updatedAt) ||
+    toMilliseconds(item.completedAt) ||
+    toMilliseconds(item.startedAt) ||
+    toMilliseconds(item.createdAt) ||
+    0
+  );
+}
+
+// Remove itens que possuam um tombstone ativo (exclusão mais recente que o próprio item).
+// Um item pode "reviver" se tiver um carimbo próprio mais novo que a exclusão (ex.: re-marcação).
+function filterTombstoned<T extends { id: string }>(
+  items: T[],
+  runningTombstones: SyncTombstone[],
+  kind: TombstoneKind,
+  keyOf: (item: T) => string,
+  stampOf: (item: T) => number
+): T[] {
+  const kept: T[] = [];
+  for (const item of items) {
+    const key = keyOf(item);
+    const idx = runningTombstones.findIndex((t) => t.kind === kind && t.id === key);
+    if (idx === -1) {
+      kept.push(item);
+      continue;
+    }
+    const itemStamp = stampOf(item);
+    if (itemStamp > 0 && itemStamp > runningTombstones[idx].deletedAt) {
+      runningTombstones.splice(idx, 1);
+      kept.push(item);
+    }
+  }
+  return kept;
 }
 
 function mergeSessions(
@@ -120,6 +190,7 @@ export const syncMergeService = {
       kanbanBoard: data.kanbanBoard ?? kanbanService.getDefaultBoard(),
       kanbanColumns: data.kanbanColumns ?? [],
       kanbanTasks: data.kanbanTasks ?? [],
+      tombstones: data.tombstones ?? [],
     };
   },
 
@@ -148,24 +219,86 @@ export const syncMergeService = {
       (board: KanbanBoard) => toMilliseconds(board.updatedAt) || 0
     );
 
-    const columns = kanbanService.reindexColumns(
-      kanbanService.sortColumns(mergeById(local.kanbanColumns, remote.kanbanColumns, localUpdatedAt, remoteUpdatedAt))
+    const mergedTombstones = mergeTombstones(local.tombstones, remote.tombstones);
+    const activeTombstones = [...mergedTombstones];
+
+    const byId = (item: { id: string }) => item.id;
+    const categories = filterTombstoned(local.categories, activeTombstones, 'category', byId, (c) =>
+      toPerItemStamp(c)
     );
-    const tasks = kanbanService.reindexTasks(
-      kanbanService.sortTasks(mergeById(local.kanbanTasks, remote.kanbanTasks, localUpdatedAt, remoteUpdatedAt))
+    const remoteCategories = filterTombstoned(remote.categories, activeTombstones, 'category', byId, (c) =>
+      toPerItemStamp(c)
+    );
+    const habits = filterTombstoned(local.habits, activeTombstones, 'habit', byId, (h) => toPerItemStamp(h));
+    const remoteHabits = filterTombstoned(remote.habits, activeTombstones, 'habit', byId, (h) => toPerItemStamp(h));
+    const localCompletions = filterTombstoned(
+      local.completions,
+      activeTombstones,
+      'completion',
+      (c) => `${c.habitId}|${c.date}`,
+      (c) => toMilliseconds(c.updatedAt) || 0
+    );
+    const remoteCompletions = filterTombstoned(
+      remote.completions,
+      activeTombstones,
+      'completion',
+      (c) => `${c.habitId}|${c.date}`,
+      (c) => toMilliseconds(c.updatedAt) || 0
+    );
+    const localSessions = filterTombstoned(
+      local.pomodoroSessions,
+      activeTombstones,
+      'pomodoroSession',
+      byId,
+      (s) => toPerItemStamp(s)
+    );
+    const remoteSessions = filterTombstoned(
+      remote.pomodoroSessions,
+      activeTombstones,
+      'pomodoroSession',
+      byId,
+      (s) => toPerItemStamp(s)
+    );
+    const localColumns = filterTombstoned(
+      local.kanbanColumns,
+      activeTombstones,
+      'kanbanColumn',
+      byId,
+      (c) => toPerItemStamp(c)
+    );
+    const remoteColumns = filterTombstoned(
+      remote.kanbanColumns,
+      activeTombstones,
+      'kanbanColumn',
+      byId,
+      (c) => toPerItemStamp(c)
+    );
+    const localTasks = filterTombstoned(local.kanbanTasks, activeTombstones, 'kanbanTask', byId, (t) =>
+      toPerItemStamp(t)
+    );
+    const remoteTasks = filterTombstoned(remote.kanbanTasks, activeTombstones, 'kanbanTask', byId, (t) =>
+      toPerItemStamp(t)
+    );
+
+    const mergedColumns = kanbanService.reindexColumns(
+      kanbanService.sortColumns(mergeById(localColumns, remoteColumns, localUpdatedAt, remoteUpdatedAt))
+    );
+    const mergedTasks = kanbanService.reindexTasks(
+      kanbanService.sortTasks(mergeById(localTasks, remoteTasks, localUpdatedAt, remoteUpdatedAt))
     );
 
     return {
       version: SYNC_VERSION,
       updatedAt,
-      categories: mergeById(local.categories, remote.categories, localUpdatedAt, remoteUpdatedAt),
-      habits: mergeById(local.habits, remote.habits, localUpdatedAt, remoteUpdatedAt),
-      completions: mergeCompletions(local.completions, remote.completions),
+      categories: mergeById(categories, remoteCategories, localUpdatedAt, remoteUpdatedAt),
+      habits: mergeById(habits, remoteHabits, localUpdatedAt, remoteUpdatedAt),
+      completions: mergeCompletions(localCompletions, remoteCompletions),
       pomodoroSettings: mergeSettings,
-      pomodoroSessions: mergeSessions(local.pomodoroSessions, remote.pomodoroSessions, localUpdatedAt, remoteUpdatedAt),
+      pomodoroSessions: mergeSessions(localSessions, remoteSessions, localUpdatedAt, remoteUpdatedAt),
       kanbanBoard: mergeBoard,
-      kanbanColumns: columns,
-      kanbanTasks: tasks,
+      kanbanColumns: mergedColumns,
+      kanbanTasks: mergedTasks,
+      tombstones: activeTombstones,
     };
   },
 

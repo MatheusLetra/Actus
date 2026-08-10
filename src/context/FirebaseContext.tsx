@@ -40,6 +40,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     kanbanBoard,
     kanbanColumns,
     kanbanTasks,
+    tombstones,
     importData,
   } = useHabits();
 
@@ -62,6 +63,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     kanbanBoard,
     kanbanColumns,
     kanbanTasks,
+    tombstones,
   });
   dataRef.current = {
     version: SYNC_VERSION,
@@ -73,6 +75,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     kanbanBoard,
     kanbanColumns,
     kanbanTasks,
+    tombstones,
   };
 
   const lastWrittenUpdatedAtRef = useRef(0);
@@ -83,8 +86,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const unsubscribeWatchRef = useRef<(() => void) | null>(null);
 
   const localSerialized = useMemo(
-    () => JSON.stringify({ categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks }),
-    [categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks]
+    () => JSON.stringify({ categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, tombstones }),
+    [categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, tombstones]
   );
 
   const stopWatch = () => {

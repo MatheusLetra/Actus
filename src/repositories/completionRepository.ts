@@ -27,7 +27,7 @@ export const completionRepository = {
       } else {
         // Mark as true
         updated = [...list];
-        updated[existingIndex] = { ...existing, completed: true };
+        updated[existingIndex] = { ...existing, completed: true, updatedAt: new Date().toISOString() };
         completed = true;
       }
     } else {
@@ -37,6 +37,7 @@ export const completionRepository = {
         habitId,
         date,
         completed: true,
+        updatedAt: new Date().toISOString(),
       };
       updated = [...list, newCompletion];
       completed = true;
@@ -54,7 +55,7 @@ export const completionRepository = {
       const existing = list[existingIndex];
       if (existing.completed) return list;
       const updated = [...list];
-      updated[existingIndex] = { ...existing, completed: true };
+      updated[existingIndex] = { ...existing, completed: true, updatedAt: new Date().toISOString() };
       this.saveAll(updated);
       return updated;
     }
@@ -64,6 +65,7 @@ export const completionRepository = {
       habitId,
       date,
       completed: true,
+      updatedAt: new Date().toISOString(),
     };
     const updated = [...list, newCompletion];
     this.saveAll(updated);

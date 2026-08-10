@@ -39,7 +39,7 @@ A aplicação é **offline-first, 100% no navegador, sem backend próprio** e a 
 2. **Resolução de conflito** — "quem editou por último vence por item": itens com `id` igual presentes nos dois lados são resolvidos pela versão da origem com `updatedAt` mais recente (por item quando houver `updatedAt`/`completedAt` — kanban task, kanban board, pomodoro session —; senão pelo `updatedAt` global do snapshot). Itens exclusivos de um lado são preservados (união).
 3. **Sincronização em tempo real** (recomendado): `onSnapshot` do documento aplica mudanças remotas automaticamente, com guarda anti-eco. Se preferir algo minimalista: sincronizar **apenas no login + botão "Sincronizar agora"** + push com debounce.
 4. **Intervalo de push**: debounce de ~800 ms após qualquer alteração de dados no `HabitContext`.
-5. **Escopo sincronizado**: categorias, hábitos, completions, pomodoro settings/sessions e kanban board/columns/tasks (espelho exato do backup `version: 3`). O **tema** (`actus:theme`) permanece local por dispositivo.
+5. **Escopo sincronizado**: categorias, hábitos, completions, pomodoro settings/sessions, kanban board/columns/tasks **e tombstones** de exclusão (espelho exato do backup `version: 3`). O **tema** (`actus:theme`) permanece local por dispositivo.
 
 ## Arquitetura
 
@@ -76,7 +76,8 @@ users/{uid}                                  // documento núcleo — dados pequ
     pomodoroSessions: [] /* excluído aqui */,
     kanbanBoard:      {...},
     kanbanColumns:    [...],
-    kanbanTasks:      [...]
+    kanbanTasks:      [...],
+    tombstones:       [ { kind, id, deletedAt } ]   // marcas de exclusão propagáveis
   }
 }
 
@@ -102,11 +103,12 @@ Serviço puro (object literal, sem React/Firebase) com entrada `(local, remote)`
 
 1. `updatedAt = max(local.updatedAt, remote.updatedAt)`.
 2. **Coleções com `id`** (categories, habits, kanbanColumns, kanbanTasks): união por `id`; item em ambos os lados → versão da origem mais recente (por `updatedAt` do item quando existir; senão pelo `updatedAt` do snapshot).
-3. **Completions**: união por chave `habitId + date`; `completed: true` vence (o app só guarda concluídos; desmarcar remove o registro).
-4. **PomodoroSessions**: união por `id`; versão com `completedAt`/`startedAt` mais recente.
-5. **Configurações**: `pomodoroSettings` (sem timestamp próprio) e `kanbanBoard` (tem `updatedAt`) → prevalece o lado com `updatedAt` global mais recente.
-6. Após o merge, `importData(JSON.stringify(merged))` valida a estrutura completa e aplica em localStorage + estado (sem reindexações adicionais — os dados de cada lado já vêm válidos).
-7. O particionamento mensal é **transparente**: o merge opera sobre os arrays completos (`completions`, `pomodoroSessions`) recombinados pelo `syncService` (leitura) e reparticionados na escrita.
+3. **Completions**: união por chave `habitId + date`; `completed: true` vence registros falsos. Desmarcar/remover registra um **tombstone** (`completion`, chave `habitId|date`) para propagar a remoção aos demais dispositivos; re-marcar cria um novo registro com `updatedAt` mais novo, que **revive** o item e elimina o tombstone.
+4. **Tombstones** (deleções): toda exclusão (categoria, hábito, `completion`, `pomodoroSession`, `kanbanColumn`, `kanbanTask`) grava `{ kind, id, deletedAt }`. No merge, tombstone de mesmo `kind+id` vence o mais recente e **remove itens cobertos** das coleções; um item só sobrevive se tiver timestamp próprio mais novo que o `deletedAt` (revira/recriação).
+5. **PomodoroSessions**: união por `id`; versão com `completedAt`/`startedAt` mais recente.
+6. **Configurações**: `pomodoroSettings` (sem timestamp próprio) e `kanbanBoard` (tem `updatedAt`) → prevalece o lado com `updatedAt` global mais recente.
+7. Após o merge, `importData(JSON.stringify(merged))` valida a estrutura completa e aplica em localStorage + estado (sem reindexações adicionais — os dados de cada lado já vêm válidos).
+8. O particionamento mensal é **transparente**: o merge opera sobre os arrays completos (`completions`, `pomodoroSessions`) recombinados pelo `syncService` (leitura) e reparticionados na escrita.
 
 ## Fluxos
 
@@ -179,7 +181,7 @@ service cloud.firestore {
 
 ### 3. Lógica pura — `syncMergeService` + testes
 - [x] Criar `src/services/syncMergeService.ts`: `mergeSnapshots(local, remote)` conforme o algoritmo acima (união + last-writer-wins por item), `getSnapshotUpdatedAt`, helpers de resolução de conflito.
-- [x] Criar `src/tests/syncMergeService.test.ts` (testes: merge preserva itens exclusivos locais e remotos; item em ambos → vence o mais recente; completions unem por habitId+date; settings vence o lado mais recente; updatedAt = max; casos limite vazios).
+- [x] Criar `src/tests/syncMergeService.test.ts` (testes: merge preserva itens exclusivos locais e remotos; item em ambos → vence o mais recente; completions unem por habitId+date; settings vence o lado mais recente; updatedAt = max; propaga desmarcação via tombstone; re-marcação revive; exclusão de hábito; união de tombstones; casos limite vazios).
 
 ### 4. Persistência local da sessão (constants)
 - [x] `src/constants/index.ts` — adicionar em `STORAGE_KEYS`: `syncUser: 'actus:syncUser'`, `lastSyncAt: 'actus:lastSyncAt'`.

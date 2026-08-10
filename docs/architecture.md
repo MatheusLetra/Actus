@@ -60,7 +60,7 @@ src/
 ├── services/         notificationService, audioService (helpers de browser — não puros)
 ├── services/         syncMergeService (merge puro de snapshots p/ sincronização)
 ├── services/firebase config.ts, authService.ts, syncService.ts (helpers de browser — não puros)
-├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository
+├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository, tombstoneRepository
 ├── context/          ThemeContext, HabitContext, FirebaseContext
 ├── components/
 │   ├── ui/           Primitivas Shadcn (button, card, dialog, sheet, badge, progress, switch, input, label)
@@ -77,7 +77,7 @@ src/
 │                     PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
 ├── pages/            Dashboard, Habits, Categories, Tools, Pomodoro, Kanban, History, Settings
 ├── routes/           Configuração do React Router
-└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts
+└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts, syncMergeService.test.ts
 ```
 
 ## Rotas
@@ -96,7 +96,7 @@ src/
 ## Gerenciamento de Estado
 
 - **ThemeContext**: tema `light` / `dark` / `system`; aplica classe no `<html>` e persiste em `actus:theme`.
-- **HabitContext**: estado central com `categories`, `habits`, `completions`, `pomodoroSettings`, `pomodoroSessions`, `kanbanBoard`, `kanbanColumns`, `kanbanTasks` e todas as ações de domínio. Stats derivados via `useMemo`:
+- **HabitContext**: estado central com `categories`, `habits`, `completions`, `pomodoroSettings`, `pomodoroSessions`, `kanbanBoard`, `kanbanColumns`, `kanbanTasks`, `tombstones` e todas as ações de domínio. Stats derivados via `useMemo`:
   - `dashboardStats` (depende de `habits`, `categories`, `completions`)
   - `categoryStats` (depende de `categories`, `habits`, `completions`)
   - `pomodoroStats` (depende de `pomodoroSessions`, `habits`)
@@ -119,6 +119,7 @@ Chaves centralizadas em `src/constants/index.ts`:
 | `actus:kanbanBoard` | Quadro kanban (nome/cor) |
 | `actus:kanbanColumns` | Colunas do quadro kanban |
 | `actus:kanbanTasks` | Tarefas do quadro kanban |
+| `actus:tombstones` | Marcas de exclusão da sincronização (`{ kind, id, deletedAt }`) |
 
 Dados corrompidos são interceptados por `storageService` (try/catch) com fallback seguro.
 
@@ -130,7 +131,7 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 - **seedService**: `seedDemoData` — popula categorias/hábitos/histórico (~30 dias) na primeira execução.
 - **pomodoroService**: defaults/validação de settings, duração por tipo de ciclo, sequência de fases (pausa longa a cada N focos), `getPomodoroStats`.
 - **kanbanService**: `getDefaultBoard`, `getDefaultColumns`, validação de board/column/task, ordenação/reindexação por `order`, `moveTask` (troca de coluna + reindexação de origem/destino), `getKanbanStats`, `getColumnsSortedForSelect`.
-- **completionRepository**: `toggle` (marca/desmarca) e `complete` (idempotente) — usados pela UI e pelo pomodoro.
+- **completionRepository**: `toggle` (marca/desmarca) e `complete` (idempotente) — usados pela UI e pelo pomodoro. Marcas de exclusão são gravadas pelo **tombstoneRepository** (deleções, desmarcações e reset de dados).
 
 ## Pomodoro (detalhes de implementação)
 
@@ -158,7 +159,7 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 - **Autenticação**: Firebase Auth com `GoogleAuthProvider` (`src/services/firebase/authService.ts`); estado via `onAuthStateChanged`; sessão persistida no navegador. Credenciais em `.env` (`VITE_FIREBASE_*`), lidas em `src/services/firebase/config.ts` (sem `initializeApp` se ausentes, e o card é ocultado).
 - **Persistência remota**: Cloud Firestore com núcleo por usuário (`users/{uid}`: categories, habits, settings, kanban) e **subcoleções mensais** para as listas que crescem (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) — evita o limite de 1 MB/documento. `syncService.readSnapshot` recombina os meses; `writeSnapshot` reparticiona e remove meses órfãos.
 - **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). Guarda anti-eco via `lastWrittenUpdatedAtRef`.
-- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item (timestamp próprio `updatedAt`/`completedAt` se houver, senão `updatedAt` do snapshot); completions unem por `habitId+date` preferindo `completed:true`; kanban reordenado/reindexado no merge.
+- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item (timestamp próprio `updatedAt`/`completedAt` se houver, senão `updatedAt` do snapshot); completions unem por `habitId+date` preferindo `completed:true`; **tombstones** unem por `kind+id` (vence o mais recente) e removem itens cobertos por exclusão (item revira se tiver timestamp próprio mais novo que o `deletedAt`); kanban reordenado/reindexado no merge.
 - **Regras Firestore** no console: `match /users/{userId}` + subcoleções com `allow read, write: if request.auth.uid == userId`.
 - **UI**: `CloudSyncCard` em Configurações (login, "Sincronizar agora", "Sair"); rodapé da página indica status de sync.
 
@@ -175,7 +176,7 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 ## Testes
 
 - Vitest, arquivos em `src/tests/*.test.ts` (ambiente node, sem jsdom).
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts` — **25 testes**.
+- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts`, `syncMergeService.test.ts` — **42 testes**.
 - Execução: `npm run test:run` (uma vez) ou `npm run test` (watch).
 
 ## Executar e Validar

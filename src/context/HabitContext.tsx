@@ -11,12 +11,14 @@ import type {
   PomodoroSession,
   PomodoroSettings,
   PomodoroStats,
+  SyncTombstone,
 } from '@/types';
 import { categoryRepository } from '@/repositories/categoryRepository';
 import { habitRepository } from '@/repositories/habitRepository';
 import { completionRepository } from '@/repositories/completionRepository';
 import { pomodoroRepository } from '@/repositories/pomodoroRepository';
 import { kanbanRepository } from '@/repositories/kanbanRepository';
+import { tombstoneRepository } from '@/repositories/tombstoneRepository';
 import { seedService } from '@/services/seedService';
 import { statisticsService } from '@/services/statisticsService';
 import { pomodoroService } from '@/services/pomodoroService';
@@ -29,6 +31,7 @@ interface HabitContextType {
   completions: HabitCompletion[];
   dashboardStats: DashboardStats;
   categoryStats: CategoryStat[];
+  tombstones: SyncTombstone[];
 
   // Category Actions
   addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => void;
@@ -85,6 +88,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>(kanbanService.getDefaultBoard);
   const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
   const [kanbanTasks, setKanbanTasks] = useState<KanbanTask[]>([]);
+  const [tombstones, setTombstones] = useState<SyncTombstone[]>(() => tombstoneRepository.getAll());
 
   // Initialize data on mount
   useEffect(() => {
@@ -103,6 +107,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setKanbanBoard(kanbanRepository.initBoardIfMissing());
     setKanbanColumns(kanbanRepository.getColumns());
     setKanbanTasks(kanbanRepository.getTasks());
+    setTombstones(tombstoneRepository.getAll());
   }, []);
 
   // Compute Dashboard Stats reactively
@@ -146,6 +151,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     const updated = categoryRepository.delete(id);
     setCategories(updated);
+    setTombstones(tombstoneRepository.add('category', id));
     return { success: true };
   };
 
@@ -166,10 +172,16 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteHabit = (id: string) => {
+    const habitCompletionTombstones: SyncTombstone[] = completions
+      .filter((c) => c.habitId === id)
+      .map((c) => ({ kind: 'completion', id: `${c.habitId}|${c.date}`, deletedAt: Date.now() }));
     const updatedHabits = habitRepository.delete(id);
     const updatedCompletions = completionRepository.deleteByHabitId(id);
     setHabits(updatedHabits);
     setCompletions(updatedCompletions);
+    setTombstones(
+      tombstoneRepository.addAll([{ kind: 'habit', id, deletedAt: Date.now() }, ...habitCompletionTombstones])
+    );
   };
 
   const toggleHabitActive = (id: string) => {
@@ -181,12 +193,18 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const toggleHabitCompletion = (habitId: string, dateStr = dateService.getTodayString()) => {
     const result = completionRepository.toggle(habitId, dateStr);
     setCompletions(result.completions);
+    setTombstones(
+      result.completed
+        ? tombstoneRepository.removeCompletion(habitId, dateStr)
+        : tombstoneRepository.addCompletion(habitId, dateStr)
+    );
     return { completed: result.completed };
   };
 
   const completeHabitCompletion = (habitId: string, dateStr = dateService.getTodayString()) => {
     const updated = completionRepository.complete(habitId, dateStr);
     setCompletions(updated);
+    setTombstones(tombstoneRepository.removeCompletion(habitId, dateStr));
   };
 
   // Pomodoro Operations
@@ -210,11 +228,18 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const removePomodoroSession = (id: string) => {
     const updated = pomodoroRepository.remove(id);
     setPomodoroSessions(updated);
+    setTombstones(tombstoneRepository.add('pomodoroSession', id));
   };
 
   const clearPomodoroSessions = () => {
+    const current = pomodoroSessions;
     const updated = pomodoroRepository.clear();
     setPomodoroSessions(updated);
+    setTombstones(
+      tombstoneRepository.addAll(
+        current.map((s) => ({ kind: 'pomodoroSession' as const, id: s.id, deletedAt: Date.now() }))
+      )
+    );
   };
 
   // Kanban Operations
@@ -256,9 +281,17 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         );
       } else {
         tasks = tasks.filter((t) => t.columnId !== id);
+        setTombstones(
+          tombstoneRepository.addAll([
+            { kind: 'kanbanColumn', id, deletedAt: Date.now() },
+            ...orphanTasks.map((t) => ({ kind: 'kanbanTask' as const, id: t.id, deletedAt: Date.now() })),
+          ])
+        );
       }
       kanbanRepository.saveTasks(tasks);
       setKanbanTasks(tasks);
+    } else {
+      setTombstones(tombstoneRepository.add('kanbanColumn', id));
     }
 
     setKanbanColumns(kanbanService.reindexColumns(remainingColumns));
@@ -285,6 +318,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deleteKanbanTask = (id: string) => {
     const updated = kanbanRepository.deleteTask(id);
     setKanbanTasks(updated);
+    setTombstones(tombstoneRepository.add('kanbanTask', id));
 
     if (pomodoroSettings.linkedTaskId === id) {
       updatePomodoroSettings({ ...pomodoroSettings, linkedTaskId: null });
@@ -299,10 +333,24 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Reset to Demo
   const resetToDemoData = () => {
+    const now = Date.now();
+    const tombstonesToRecord: SyncTombstone[] = [
+      ...categories.map((c) => ({ kind: 'category' as const, id: c.id, deletedAt: now })),
+      ...habits.map((h) => ({ kind: 'habit' as const, id: h.id, deletedAt: now })),
+      ...completions.map((c) => ({
+        kind: 'completion' as const,
+        id: `${c.habitId}|${c.date}`,
+        deletedAt: now,
+      })),
+      ...pomodoroSessions.map((s) => ({ kind: 'pomodoroSession' as const, id: s.id, deletedAt: now })),
+      ...kanbanColumns.map((c) => ({ kind: 'kanbanColumn' as const, id: c.id, deletedAt: now })),
+      ...kanbanTasks.map((t) => ({ kind: 'kanbanTask' as const, id: t.id, deletedAt: now })),
+    ];
     const data = seedService.seedDemoData();
     setCategories(data.categories);
     setHabits(data.habits);
     setCompletions(data.completions);
+    setTombstones(tombstoneRepository.addAll(tombstonesToRecord));
   };
 
   // Backup & Restore
@@ -317,6 +365,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         kanbanBoard,
         kanbanColumns,
         kanbanTasks,
+        tombstones,
         version: 3,
       },
       null,
@@ -371,6 +420,11 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setKanbanTasks(parsed.kanbanTasks);
         }
 
+        if (Array.isArray(parsed.tombstones)) {
+          tombstoneRepository.saveAll(parsed.tombstones);
+          setTombstones(parsed.tombstones);
+        }
+
         return true;
       }
       return false;
@@ -387,6 +441,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         completions,
         dashboardStats,
         categoryStats,
+        tombstones,
         addCategory,
         updateCategory,
         deleteCategory,

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { Habit, HabitCompletion, KanbanBoard, KanbanColumn, KanbanTask, PomodoroSession, PomodoroSettings } from '../types';
+import type {
+  Habit,
+  HabitCompletion,
+  KanbanBoard,
+  KanbanColumn,
+  KanbanTask,
+  PomodoroSession,
+  PomodoroSettings,
+  SyncTombstone,
+} from '../types';
 import { syncMergeService, type ActusSnapshot } from '../services/syncMergeService';
 import { pomodoroService } from '../services/pomodoroService';
 
@@ -21,8 +30,12 @@ function habit(overrides: Partial<Habit> = {}): Habit {
   };
 }
 
-function completion(habitId: string, date: string, completed = true): HabitCompletion {
-  return { id: `c_${habitId}_${date}`, habitId, date, completed };
+function completion(habitId: string, date: string, completed = true, updatedAt?: string): HabitCompletion {
+  return { id: `c_${habitId}_${date}`, habitId, date, completed, updatedAt };
+}
+
+function tombstone(kind: SyncTombstone['kind'], id: string, deletedAt: number): SyncTombstone {
+  return { kind, id, deletedAt };
 }
 
 function session(overrides: Partial<PomodoroSession> = {}): PomodoroSession {
@@ -75,6 +88,7 @@ function snapshot(overrides: Partial<ActusSnapshot> = {}): ActusSnapshot {
     kanbanBoard: board(),
     kanbanColumns: [],
     kanbanTasks: [],
+    tombstones: [],
     ...overrides,
   };
 }
@@ -183,4 +197,66 @@ describe('syncMergeService', () => {
     const b = snapshot({ habits: [habit()] });
     expect(syncMergeService.dataEquals(a, b)).toBe(true);
   });
+
+  it('should propagate a completion unmark as a tombstone (removing the remote record)', () => {
+    const local = snapshot({
+      updatedAt: 200,
+      completions: [completion('habit_1', '2026-08-01', true, '2026-08-10T08:00:00.000Z')],
+    });
+    const remote = snapshot({
+      updatedAt: 300,
+      tombstones: [tombstone('completion', 'habit_1|2026-08-01', dateMs('2026-08-10T09:00:00.000Z'))],
+    });
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+    expect(merged!.completions).toHaveLength(0);
+    expect(merged!.tombstones).toHaveLength(1);
+  });
+
+  it('should revive a completion when re-marked with a newer updatedAt than the tombstone', () => {
+    const local = snapshot({
+      updatedAt: 500,
+      tombstones: [tombstone('completion', 'habit_1|2026-08-01', dateMs('2026-08-10T08:00:00.000Z'))],
+    });
+    const remote = snapshot({
+      updatedAt: 400,
+      completions: [completion('habit_1', '2026-08-01', true, '2026-08-10T09:00:00.000Z')],
+    });
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+    expect(merged!.completions).toHaveLength(1);
+    expect(merged!.completions[0].completed).toBe(true);
+    expect(merged!.tombstones).toHaveLength(0);
+  });
+
+  it('should drop a habit covered by a habit tombstone', () => {
+    const local = snapshot({
+      updatedAt: 200,
+      habits: [habit({ id: 'habit_1', createdAt: oldIso })],
+    });
+    const remote = snapshot({
+      updatedAt: 300,
+      tombstones: [tombstone('habit', 'habit_1', dateMs('2026-01-15T00:00:00.000Z'))],
+    });
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+    expect(merged!.habits).toHaveLength(0);
+  });
+
+  it('should keep the newest tombstone when both sides have the same key', () => {
+    const local = snapshot({
+      tombstones: [tombstone('habit', 'habit_1', 100)],
+    });
+    const remote = snapshot({
+      tombstones: [tombstone('habit', 'habit_1', 200)],
+    });
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+    expect(merged!.tombstones).toEqual([{ kind: 'habit', id: 'habit_1', deletedAt: 200 }]);
+  });
+
+  it('should default tombstones to an empty array in buildData', () => {
+    const data = syncMergeService.buildData({ categories: [] });
+    expect(data.tombstones).toEqual([]);
+  });
 });
+
+function dateMs(iso: string): number {
+  return new Date(iso).getTime();
+}

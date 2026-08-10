@@ -9,7 +9,8 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - Pomodoro (etapas 1–10 + evoluções da segunda rodada): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-POMODORO.md`.
 - Quadro Kanban (etapas 1–9): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-QUADRO-KANBAN.md`.
 - Sincronização Google/Firebase: `[x]` — ver `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md`.
-- Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **37/37 testes** (5 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
+- Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **42/42 testes** (5 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
+- **Correção de bug (rodada 5 — sincronização)**: exclusões/desmarcações agora **propagam para todos os dispositivos** via *tombstones* (antes, desmarcar em um dispositivo podia voltar a aparecer como concluído ao sincronizar com outro). Detalhes abaixo.
 
 ## O que foi implementado (resumo — rodada mais recente: Sincronização Google)
 
@@ -26,20 +27,36 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - `src/services/syncMergeService.ts` (merge puro)
 - `src/context/FirebaseContext.tsx`
 - `src/components/settings/CloudSyncCard.tsx`
-- `src/tests/syncMergeService.test.ts` (12 testes)
+- `src/tests/syncMergeService.test.ts` (17 testes)
+- `src/repositories/tombstoneRepository.ts` (marcas de exclusão p/ sync)
 - `.env` / `.env.example`
 
 **Modificados:**
 - `package.json` (dep `firebase@^12.17.1` — aprovado)
 - `.gitignore` (`.env`, `.env.*` exceto `.env.example`)
-- `src/constants/index.ts` (`STORAGE_KEYS.syncUser`, `lastSyncAt`)
+- `src/constants/index.ts` (`STORAGE_KEYS.syncUser`, `lastSyncAt`, `tombstones`)
 - `src/App.tsx` (FirebaseProvider)
 - `src/pages/Settings/index.tsx` (CloudSyncCard + rodapé com status de sync)
+
+## Correções de bugs (rodada 5 — sincronização: deleções propagando)
+
+**Bug relatado**: desmarcar um hábito no celular "voltava a concluído" ao abrir no PC. Causa: o merge só fazia **união** (último escritor vence) e a desmarcação apenas removia o registro localmente — o registro antigo do outro dispositivo ressurgia no próximo merge.
+
+**Correção — tombstones de exclusão** (arquivos):
+- `src/types/index.ts`: `SyncTombstone` + `TombstoneKind`; `HabitCompletion.updatedAt`.
+- `src/repositories/tombstoneRepository.ts` (novo): marcações `{ kind, id, deletedAt }` persistidas em `actus:tombstones`.
+- `src/repositories/completionRepository.ts`: grava `updatedAt` ao marcar.
+- `src/services/syncMergeService.ts`: `ActusData.tombstones`; união de tombstones por `kind+id` (vence o mais recente); filtro remove itens cobertos por exclusão; item **revive** se timestamp próprio > `deletedAt` (re-marcação).
+- `src/context/HabitContext.tsx`: grava tombstone ao desmarcar/apagar (categoria, hábito + completions, session pomodoro, coluna/tarefa kanban, reset); remove ao re-marcar; export/import inclui `tombstones`.
+- `src/context/FirebaseContext.tsx` + `src/services/firebase/syncService.ts`: `tombstones` no snapshot local, no push e no núcleo do Firestore.
+
+**Regra de sincronização atual**: desmarcar/apagar propaga para todos os dispositivos; re-marcar (novo `updatedAt`) revoga a exclusão e volta a sincronizar. Testes novos em `syncMergeService.test.ts` (6 casos).
 
 ## Decisões de implementação (lembrar)
 
 - **Scharding**: `completions` e `pomodoroSessions` são particionadas por mês (`YYYY-MM`) nas subcoleções Firestore; `readSnapshot` recombinar e `writeSnapshot` reparticiona (+ remove meses órfãos). Merge opera sobre arrays completos em memória.
 - **Merge**: items só de um lado são sempre preservados (união); item em ambos vence pela versão com timestamp mais recente (por item quando houver `updatedAt`/`completedAt`, senão pelo `updatedAt` global do snapshot). Completions unem por `habitId+date` preferindo `completed:true`. Kanban é reordenado/reindexado após o merge.
+- **Tombstones**: exclusões (habits, categories, completions, pomodoroSessions, kanbanColumns/tasks) geram `{ kind, id, deletedAt }` em `actus:tombstones`; o merge une por `kind+id` (vence o mais recente) e remove itens cobertos. `HabitCompletion.updatedAt` registra marcações recentes; re-marcar "revive" o item (timestamp > `deletedAt`) e apaga o tombstone.
 - **Antieco**: `lastWrittenUpdatedAtRef` compara `updatedAt`; push gravado com `updatedAt = Date.now()`; ao aplicar snapshot remoto mais novo, o write-back preserva o `updatedAt` remoto para convergir sem loop.
 - **Firestore rules** (aplicar no console): `match /users/{userId}` + subcoleções, `allow read, write: if request.auth.uid == userId`.
 - **Chunk size**: o bundle subiu para ~2,1 MB (Firebase ~+600 kB gzip). Aviso pré-existente. Código-splitting (import dinâmico do Firebase) é evolução pendente opcional.
@@ -72,7 +89,7 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 ## Validação atual (rodada mais recente)
 
 - `npm run lint` — sem erros de tipo.
-- `npm run test:run` — 5 arquivos, **37 testes** passando.
+- `npm run test:run` — 5 arquivos, **42 testes** passando.
 - `npm run build` — gerado com sucesso (chunk > 500 kB: aviso de tamanho, não é erro).
 
 ## O que foi implementado (resumo — rodada mais recente: Quadro Kanban)

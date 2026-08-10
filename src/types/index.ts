@@ -27,6 +27,23 @@ export interface HabitCompletion {
   habitId: string;
   date: string; // YYYY-MM-DD
   completed: boolean;
+  updatedAt?: string; // ISO — usado pelo merge de sincronização (reviver re-marcações)
+}
+
+export type TombstoneKind =
+  | 'category'
+  | 'habit'
+  | 'completion'
+  | 'pomodoroSession'
+  | 'kanbanColumn'
+  | 'kanbanTask';
+
+// Marca de exclusão propagada na sincronização (tombstone).
+// Para 'completion', `id` é o padrão `${habitId}|${date}`.
+export interface SyncTombstone {
+  kind: TombstoneKind;
+  id: string;
+  deletedAt: number; // epoch ms
 }
 
 export type Theme = 'light' | 'dark' | 'system';

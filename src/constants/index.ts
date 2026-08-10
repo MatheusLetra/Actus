@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   kanbanBoard: 'actus:kanbanBoard',
   kanbanColumns: 'actus:kanbanColumns',
   kanbanTasks: 'actus:kanbanTasks',
+  tombstones: 'actus:tombstones',
   syncUser: 'actus:syncUser',
   lastSyncAt: 'actus:lastSyncAt',
 } as const;
