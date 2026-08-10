@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Timer, ArrowRight } from 'lucide-react';
+import { Timer, KanbanSquare, ArrowRight } from 'lucide-react';
 
 interface ToolItem {
   path: string;
@@ -18,6 +18,13 @@ const TOOLS: ToolItem[] = [
     name: 'Pomodoro',
     description: 'Ciclos de foco e pausa configuráveis, com registro automático e gráficos de desempenho.',
     icon: Timer,
+    status: 'disponível',
+  },
+  {
+    path: '/tools/kanban',
+    name: 'Quadro Kanban',
+    description: 'Organize suas tarefas em etapas personalizáveis, com ordenação por arrastar e soltar.',
+    icon: KanbanSquare,
     status: 'disponível',
   },
 ];

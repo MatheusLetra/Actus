@@ -4,7 +4,7 @@ Instruções para agentes que trabalham neste repositório. Baseadas na análise
 
 ## Visão Geral
 
-Aplicação web **Controle de Hábitos Pessoais** — cadastro, acompanhamento e análise de hábitos diários com streaks, estatísticas e gráficos. **100% no navegador (offline-first)**, persistência total via `localStorage`. Inclui **Ferramentas Úteis** (menu na Sidebar), com a ferramenta **Pomodoro** (timer configurável, registro de ciclos, notificações/som e gráficos de métricas).
+Aplicação web **Controle de Hábitos Pessoais** — cadastro, acompanhamento e análise de hábitos diários com streaks, estatísticas e gráficos. **100% no navegador (offline-first)**, persistência total via `localStorage`. Inclui **Ferramentas Úteis** (menu na Sidebar), com as ferramentas **Pomodoro** (timer configurável, registro de ciclos, notificações/som e gráficos de métricas) e **Quadro Kanban** (colunas/tarefas personalizáveis com drag and drop).
 
 ## Stack / Tecnologias
 
@@ -13,6 +13,7 @@ Aplicação web **Controle de Hábitos Pessoais** — cadastro, acompanhamento e
 - **Shadcn/UI primitives** sobre **Radix UI** (Dialog, Switch, Progress, Sheet, etc.)
 - **React Router DOM 7** (`createBrowserRouter`)
 - **Recharts 3** (gráficos), **lucide-react** (ícones)
+- **@dnd-kit/core + @dnd-kit/sortable** (drag and drop do Quadro Kanban)
 - **Vitest 4** (testes unitários), **oxlint** (configuração lint)
 
 ## Arquitetura (camadas)
@@ -29,14 +30,15 @@ main.tsx ──> App.tsx
                              ├─ Habits     │  CRUD + filtros
                              ├─ Categories │  CRUD com proteção de vínculo
                              ├─ Tools      │  Lista de ferramentas úteis
-                             │    └─ Pomodoro │ Timer configurável + registro de ciclos + gráficos
+                             │    ├─ Pomodoro │ Timer configurável + registro de ciclos + gráficos
+                             │    └─ Kanban   │ Quadro com colunas/tarefas + drag and drop
                              ├─ History    │  Log diário + filtros por período
                              └─ Settings   │  Tema + backup/restore + reset
-        └─ repositories (localStorage) ── services (date/streak/statistics/seed/pomodoro)
+        └─ repositories (localStorage) ── services (date/streak/statistics/seed/pomodoro/kanban)
 ```
 
 Regras de arquitetura:
-- **Services são puros**: `dateService`, `streakService`, `statisticsService`, `seedService`, `pomodoroService` não dependem de React nem de componentes.
+- **Services são puros**: `dateService`, `streakService`, `statisticsService`, `seedService`, `pomodoroService`, `kanbanService` não dependem de React nem de componentes.
 - **Helpers de browser separados**: `notificationService` (Notification API) e `audioService` (toca `public/pomodoro-chime.wav`, com fallback via Web Audio) são utilitários que acessam APIs do navegador — **não** são serviços puros e não devem conter lógica de negócio.
 - **Repositories isolam a UI do `localStorage`**: páginas e componentes **nunca** chamam `localStorage` diretamente — passam por `storageService` + repositories.
 - **Contexto concentra o estado e as ações**: componentes chamam funções do contexto (`useHabits()`), que gravam no storage e atualizam o estado.
@@ -47,12 +49,12 @@ Regras de arquitetura:
 ```
 src/
 ├── main.tsx / App.tsx / index.css
-├── types/            Interfaces estritas (Category, Habit, HabitCompletion, stats, pomodoro)
-├── constants/        STORAGE_KEYS, AVAILABLE_ICONS, COLOR_OPTIONS, DAYS_OF_WEEK, labels/cores pomodoro
+├── types/            Interfaces estritas (Category, Habit, HabitCompletion, stats, pomodoro, kanban)
+├── constants/        STORAGE_KEYS, AVAILABLE_ICONS, COLOR_OPTIONS, DAYS_OF_WEEK, labels/cores pomodoro, KANBAN_DEFAULT_COLUMNS
 ├── utils/            cn() (clsx + tailwind-merge)
-├── services/         dateService, streakService, statisticsService, seedService, pomodoroService
+├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService
 ├── services/         notificationService, audioService (helpers de browser — não puros)
-├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository
+├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository
 ├── context/          ThemeContext, HabitContext
 ├── components/
 │   ├── ui/           Primitivas Shadcn (button, card, dialog, sheet, badge, progress, switch, input, label)
@@ -62,13 +64,15 @@ src/
 │   ├── habits/       HabitCard, HabitFormDialog, CalendarHeatmap
 │   ├── categories/   CategoryCard, CategoryFormDialog
 │   ├── pomodoro/     PomodoroTimer, PomodoroSettingsForm, PomodoroSessionLog, usePomodoroTimer
+│   ├── kanban/       KanbanBoard, KanbanColumn, KanbanTaskCard (+ KanbanTaskCardContent p/ overlay), KanbanColumnFormDialog,
+│   │                 KanbanTaskFormDialog, KanbanBoardSettingsDialog, KanbanAdvanceDialog
 │   └── charts/       Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart, PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
-├── pages/            Dashboard, Habits, Categories, Tools, Pomodoro, History, Settings
+├── pages/            Dashboard, Habits, Categories, Tools, Pomodoro, Kanban, History, Settings
 ├── routes/           Configuração do React Router
-└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts
+└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts
 ```
 
-Arquivos de configuração raiz: `package.json`, `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `index.html`, `.gitignore`, `PLANO-IMPLEMENTACAO-POMODORO.md` (rastreamento do Pomodoro). Ativo de áudio em `public/pomodoro-chime.wav`.
+Arquivos de configuração raiz: `package.json`, `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `index.html`, `.gitignore`, `docs/PLANO-IMPLEMENTACAO-POMODORO.md` e `docs/PLANO-IMPLEMENTACAO-QUADRO-KANBAN.md` (rastreamento do Pomodoro e do Kanban). Ativo de áudio em `public/pomodoro-chime.wav`.
 
 ## Padrões de Código
 
@@ -93,7 +97,7 @@ Arquivos de configuração raiz: `package.json`, `vite.config.ts`, `tsconfig*.js
 | Types | `PascalCase` com sufixo descritivo | `HabitStreakInfo`, `DashboardStats`, `DateFilterOption` |
 | Hooks de contexto | `useX` | `useHabits()`, `useTheme()` |
 | Chaves de storage | prefixo `actus:` | `actus:habits`, `actus:theme` |
-| IDs gerados | prefixo `cat_`/`habit_`/`pomo_` + `Date.now()` | `pomo_1754654400000` |
+| IDs gerados | prefixo `cat_`/`habit_`/`pomo_`/`board_`/`col_`/`task_` + `Date.now()` | `pomo_1754654400000` |
 | Completions | `c_<habitId>_<data>` | `c_agua_2026-08-07` |
 
 ## Comandos
@@ -113,7 +117,7 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 ## Testes
 
 - Framework: **Vitest**; arquivos em `src/tests/*.test.ts`.
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts` e `pomodoroService.test.ts` (16 testes — datas, streaks e pomodoro).
+- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts` e `kanbanService.test.ts` (25 testes — datas, streaks, pomodoro e kanban).
 - Testes existentes importam serviços diretamente (sem setup especial, sem jsdom).
 - Para adicionar testes de novos serviços, criar `src/tests/<nome>.test.ts` seguindo o mesmo estilo (`describe`/`it`/`expect`).
 - **Validar sempre**: `npm run test:run` antes de finalizar alterações.
@@ -122,8 +126,10 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 
 - Toda leitura/escrita no `localStorage` deve passar por `storageService`, que faz try/catch e retorna fallback seguro.
 - `deleteCategory` retorna `{ success, message }` e **bloqueia** exclusão quando há hábitos vinculados à categoria.
-- `importData` valida a estrutura do JSON (arrays `categories`, `habits`, `completions`; pomodoro opcional) e retorna `boolean`.
+- `importData` valida a estrutura do JSON (arrays `categories`, `habits`, `completions`; pomodoro e kanban opcionais) e retorna `boolean`.
 - `pomodoroService.validateSettings` valida durações/intervados e retorna `{ valid, errors }` em PT-BR.
+- `kanbanService.validateBoard` / `validateColumn` / `validateTask` validam nomes obrigatórios e retornam `{ valid, errors }` em PT-BR.
+- `deleteKanbanColumn` move as tarefas da coluna para a primeira coluna restante; `deleteKanbanTask` limpa `linkedTaskId` do pomodoro.
 - Notificações usam `Notification` API; se o navegador bloquear a permissão, o form reverte o toggle e exibe aviso.
 - `audioService.playChime` tenta `public/pomodoro-chime.wav` e cai para chime via Web Audio se falhar.
 - Formulários validam campos obrigatórios e exibem mensagens de erro em PT-BR.

@@ -11,6 +11,7 @@ const TITLE_MAP: Record<string, string> = {
   '/settings': 'Configurações & Dados',
   '/tools': 'Ferramentas Úteis',
   '/tools/pomodoro': 'Pomodoro',
+  '/tools/kanban': 'Quadro Kanban',
 };
 
 export const AppLayout: React.FC = () => {

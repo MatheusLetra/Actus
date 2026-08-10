@@ -4,7 +4,7 @@ Uma aplicação web completa, moderna e responsiva (Mobile-First) para **cadastr
 
 A aplicação funciona **100% no navegador (offline-first)**, com persistência total via `localStorage`.
 
-Inclui também um menu de **Ferramentas Úteis** com o **Pomodoro**: timer de foco/pausas totalmente configurável, vínculo opcional com hábitos cadastrados, registro automático de ciclos, notificações sonoras/visuais ao final do tempo e gráficos de desempenho.
+Inclui também um menu de **Ferramentas Úteis** com o **Pomodoro** e o **Quadro Kanban**: timer de foco/pausas totalmente configurável com vínculo opcional de hábitos/tarefas e registro automático de ciclos; quadro de tarefas com colunas personalizáveis, drag and drop e integração com o Pomodoro.
 
 ---
 
@@ -14,8 +14,9 @@ Inclui também um menu de **Ferramentas Úteis** com o **Pomodoro**: timer de fo
 * **Estilização**: Tailwind CSS v4, Lucide React (ícones), Shadcn/UI Components
 * **Roteamento**: React Router DOM 7
 * **Gráficos**: Recharts 3
+* **Drag and drop**: @dnd-kit/core + @dnd-kit/sortable (Quadro Kanban)
 * **Notificações & Áudio**: Web Notifications API e Web Audio (com arquivo de som em `public/`)
-* **Testes**: Vitest (testes unitários para serviços e algoritmos de streak/pomodoro)
+* **Testes**: Vitest (testes unitários para serviços e algoritmos de streak/pomodoro/kanban)
 
 ---
 
@@ -67,7 +68,8 @@ src/
 │   ├── streakService.ts  # Algoritmo de cálculo de streaks e taxas
 │   ├── statisticsService.ts # Agrupamentos de analytics e gráficos
 │   ├── seedService.ts    # Carga de dados iniciais de demonstração
-│   └── pomodoroService.ts # Lógica do pomodoro (settings, sequência de fases, stats de ciclos)
+│   ├── pomodoroService.ts # Lógica do pomodoro (settings, sequência de fases, stats de ciclos)
+│   └── kanbanService.ts  # Lógica do kanban (defaults, validação, ordenação, moveTask, stats)
 │   ├── notificationService.ts # Notificações do navegador (helper de browser)
 │   └── audioService.ts   # Som de alerta (helper de browser)
 ├── repositories/         # Camada de persistência desacoplada
@@ -75,7 +77,8 @@ src/
 │   ├── habitRepository.ts
 │   ├── categoryRepository.ts
 │   ├── completionRepository.ts
-│   └── pomodoroRepository.ts
+│   ├── pomodoroRepository.ts
+│   └── kanbanRepository.ts
 ├── context/              # Gerenciamento de estado reativo (ThemeContext, HabitContext)
 ├── components/
 │   ├── ui/               # Building blocks do Shadcn/UI (Button, Card, Dialog, Progress, Switch, Sheet, etc.)
@@ -85,6 +88,7 @@ src/
 │   ├── habits/           # HabitCard, HabitFormDialog, CalendarHeatmap
 │   ├── categories/       # CategoryCard, CategoryFormDialog
 │   ├── pomodoro/         # PomodoroTimer, PomodoroSettingsForm, PomodoroSessionLog, usePomodoroTimer
+│   ├── kanban/           # KanbanBoard, KanbanColumn, KanbanTaskCard, KanbanColumnFormDialog, KanbanTaskFormDialog, KanbanBoardSettingsDialog, KanbanAdvanceDialog
 │   └── charts/           # Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart, PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
 ├── pages/
 │   ├── Dashboard/        # Visão geral de métricas e hábitos do dia
@@ -92,6 +96,7 @@ src/
 │   ├── Categories/       # CRUD de categorias com proteção contra exclusão
 │   ├── Tools/            # Menu de Ferramentas Úteis
 │   ├── Pomodoro/         # Timer + configurações + histórico + gráficos de ciclos
+│   ├── Kanban/           # Quadro de tarefas com colunas e drag and drop
 │   ├── History/          # Log histórico e filtros por período
 │   └── Settings/         # Escolha de temas (Claro/Escuro/Sistema) e Backup JSON
 ├── routes/               # Configuração do React Router
@@ -109,8 +114,11 @@ As chaves são centralizadas:
 * `actus:categories`: Lista de categorias
 * `actus:completions`: Histórico de conclusões por data (`YYYY-MM-DD`)
 * `actus:theme`: Preferência de tema (`light` | `dark` | `system`)
-* `actus:pomodoroSettings`: Configurações do pomodoro (durações, auto-início, notificações/som, hábito vinculado)
+* `actus:pomodoroSettings`: Configurações do pomodoro (durações, auto-início, notificações/som, hábito/tarefa vinculados)
 * `actus:pomodoroSessions`: Ciclos de pomodoro registrados (foco, pausas e sessão ativa/pausada)
+* `actus:kanbanBoard`: Quadro kanban (nome/cor)
+* `actus:kanbanColumns`: Colunas do quadro kanban
+* `actus:kanbanTasks`: Tarefas do quadro kanban
 
 Caso o `localStorage` contenha dados corrompidos, o `storageService` intercepta e retorna fallbacks seguros sem quebrar a aplicação.
 
@@ -129,11 +137,22 @@ As regras de streak são puras e não dependem do React:
 
 Acessível pelo menu **Ferramentas** na Sidebar. Principais funções:
 
-1. **Timer configurável**: durações de foco, pausa curta e pausa longa (com intervalo de pausa longa a cada N ciclos), auto-início de foco/pausas, e vínculo opcional a um hábito cadastrado.
+1. **Timer configurável**: durações de foco, pausa curta e pausa longa (com intervalo de pausa longa a cada N ciclos), auto-início de foco/pausas, e vínculo opcional a um hábito cadastrado ou a uma tarefa do Quadro Kanban.
 2. **Notificações ao final do tempo**: alerta do navegador (Web Notifications) e som (`public/pomodoro-chime.wav`, com fallback via Web Audio) — ambos configuráveis.
-3. **Registro automático de ciclos**: todo foco concluído é registrado no histórico; se houver hábito vinculado, sua conclusão é marcada na data (respeitando o agendamento do hábito).
+3. **Registro automático de ciclos**: todo foco concluído é registrado no histórico; se houver hábito vinculado, sua conclusão é marcada na data (respeitando o agendamento do hábito); se houver tarefa do quadro vinculada, é possível avançá-la para outra etapa.
 4. **Pausar e concluir depois**: o ciclo pausado é persistido (tempo restante) no `localStorage`; ao voltar, é possível retomar ou concluir manualmente.
 5. **Gráficos de métricas**: ciclos de foco nos últimos 30 dias, distribuição entre foco/pausas e comparação de focos por hábito vinculado.
+
+---
+
+## 📋 Ferramenta Quadro Kanban
+
+Acessível pelo menu **Ferramentas** na Sidebar. Principais funções:
+
+1. **Colunas personalizáveis**: etapas com nome e cor, criadas/renomeadas/excluídas por modais.
+2. **Tarefas com drag and drop**: ordenação dentro e entre colunas, com vínculo opcional a um hábito cadastrado.
+3. **Integração com o Pomodoro**: vincule uma tarefa ao foco e avance-a para outra etapa ao concluir o ciclo.
+4. **Responsivo**: colunas lado a lado no desktop e empilhadas verticalmente no mobile.
 
 ---
 
@@ -148,3 +167,4 @@ Os testes cobrem:
 * Manipulação e formatação de datas (`dateService.test.ts`)
 * Algoritmo de streaks e sequência histórica (`streakService.test.ts`)
 * Lógica do pomodoro: validação de settings, durações, sequência de fases e agregação de stats (`pomodoroService.test.ts`)
+* Lógica do kanban: defaults, validação, ordenação/reindexação e movimentação de tarefas (`kanbanService.test.ts`)

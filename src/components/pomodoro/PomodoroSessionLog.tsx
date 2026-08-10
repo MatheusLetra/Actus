@@ -10,7 +10,7 @@ import { IconRenderer } from '@/components/common/IconRenderer';
 import { History as HistoryIcon, Trash2 } from 'lucide-react';
 
 export const PomodoroSessionLog: React.FC = () => {
-  const { pomodoroSessions, clearPomodoroSessions, habits } = useHabits();
+  const { pomodoroSessions, clearPomodoroSessions, habits, kanbanTasks } = useHabits();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const completedSessions = pomodoroSessions
@@ -45,18 +45,19 @@ export const PomodoroSessionLog: React.FC = () => {
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
             {completedSessions.map((session) => {
               const habit = session.habitId ? habits.find((h) => h.id === session.habitId) : undefined;
+              const task = session.taskId ? kanbanTasks.find((t) => t.id === session.taskId) : undefined;
               const minutes = Math.round(session.plannedSeconds / 60);
               return (
                 <div
                   key={session.id}
-                  className="flex items-center justify-between gap-3 p-2.5 rounded-lg border bg-card hover:bg-accent/30 transition-colors"
+                  className="flex flex-col gap-2 p-2.5 rounded-lg border bg-card hover:bg-accent/30 transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div
                       className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0"
-                      style={{ backgroundColor: habit?.color || '#8b5cf6' }}
+                      style={{ backgroundColor: habit?.color || (task ? 'var(--primary)' : '#8b5cf6') }}
                     >
-                      <IconRenderer name={habit?.icon || (session.cycleType === 'focus' ? 'Flame' : 'Coffee')} size={16} />
+                      <IconRenderer name={habit?.icon || (task ? 'ListTodo' : session.cycleType === 'focus' ? 'Flame' : 'Coffee')} size={16} />
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-foreground truncate">
@@ -68,10 +69,15 @@ export const PomodoroSessionLog: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:justify-end shrink-0">
                     {session.cycleType === 'focus' && habit && (
-                      <Badge variant="secondary" className="text-[10px] font-medium max-w-40 truncate">
+                      <Badge variant="secondary" className="text-[10px] font-medium max-w-28 sm:max-w-40 truncate">
                         {habit.name}
+                      </Badge>
+                    )}
+                    {session.cycleType === 'focus' && task && (
+                      <Badge variant="outline" className="text-[10px] font-medium max-w-28 sm:max-w-40 truncate">
+                        {task.title}
                       </Badge>
                     )}
                     <span className="text-xs font-bold text-muted-foreground tabular-nums">{minutes} min</span>

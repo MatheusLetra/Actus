@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS: PomodoroSettings = {
   notificationsEnabled: true,
   soundEnabled: true,
   linkedHabitId: null,
+  linkedTaskId: null,
 };
 
 export const pomodoroService = {

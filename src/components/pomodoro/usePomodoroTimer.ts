@@ -7,21 +7,30 @@ import { streakService } from '@/services/streakService';
 import { notificationService } from '@/services/notificationService';
 import { audioService } from '@/services/audioService';
 
+export interface PendingAdvanceTask {
+  taskId: string;
+  taskTitle: string;
+  currentColumnId: string;
+}
+
 export const usePomodoroTimer = () => {
   const {
     pomodoroSettings: settings,
     pomodoroSessions,
     habits,
+    kanbanTasks,
     createPomodoroSession,
     updatePomodoroSession,
     removePomodoroSession,
     completeHabitCompletion,
+    moveKanbanTask,
   } = useHabits();
 
   const [cycleType, setCycleType] = useState<PomodoroCycleType>('focus');
   const [remainingSeconds, setRemainingSeconds] = useState(() => pomodoroService.getCycleDurationSeconds('focus', settings));
   const [isRunning, setIsRunning] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [pendingAdvanceTask, setPendingAdvanceTask] = useState<PendingAdvanceTask | null>(null);
 
   const restoredRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
@@ -59,6 +68,17 @@ export const usePomodoroTimer = () => {
       }
     }
 
+    if (activeSession?.cycleType === 'focus' && activeSession.taskId) {
+      const linkedTask = kanbanTasks.find((t) => t.id === activeSession.taskId);
+      if (linkedTask) {
+        setPendingAdvanceTask({
+          taskId: linkedTask.id,
+          taskTitle: linkedTask.title,
+          currentColumnId: linkedTask.columnId,
+        });
+      }
+    }
+
     if (settings.notificationsEnabled) {
       const title = cycleType === 'focus' ? 'Foco concluído!' : 'Pausa concluída!';
       const body = cycleType === 'focus' ? 'Hora de uma pausa.' : 'Hora de focar.';
@@ -87,7 +107,7 @@ export const usePomodoroTimer = () => {
     if (autoRun) {
       beginCycle(nextType);
     }
-  }, [activeSession, cycleType, settings, pomodoroSessions, habits, completeHabitCompletion]);
+  }, [activeSession, cycleType, settings, pomodoroSessions, habits, kanbanTasks, completeHabitCompletion]);
 
   const beginCycle = useCallback(
     (type: PomodoroCycleType, autoRun = true) => {
@@ -95,6 +115,7 @@ export const usePomodoroTimer = () => {
       const duration = pomodoroService.getCycleDurationSeconds(type, settings);
       createPomodoroSession({
         habitId: type === 'focus' ? (settings.linkedHabitId ?? null) : null,
+        taskId: type === 'focus' ? (settings.linkedTaskId ?? null) : null,
         cycleType: type,
         plannedSeconds: duration,
         remainingSeconds: duration,
@@ -185,6 +206,20 @@ export const usePomodoroTimer = () => {
     restoredRef.current = true;
   }, [activeSession, settings]);
 
+  const confirmAdvanceTask = useCallback(
+    (targetColumnId: string) => {
+      if (pendingAdvanceTask) {
+        moveKanbanTask(pendingAdvanceTask.taskId, targetColumnId);
+      }
+      setPendingAdvanceTask(null);
+    },
+    [pendingAdvanceTask, moveKanbanTask]
+  );
+
+  const dismissAdvanceTask = useCallback(() => {
+    setPendingAdvanceTask(null);
+  }, []);
+
   const plannedSeconds = activeSession?.plannedSeconds ?? pomodoroService.getCycleDurationSeconds(cycleType, settings);
   const progress = plannedSeconds > 0 ? Math.round(((plannedSeconds - remainingSeconds) / plannedSeconds) * 100) : 0;
 
@@ -196,6 +231,9 @@ export const usePomodoroTimer = () => {
     hasStarted,
     activeSession,
     progress,
+    pendingAdvanceTask,
+    confirmAdvanceTask,
+    dismissAdvanceTask,
     start,
     pause,
     resume,

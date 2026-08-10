@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { PomodoroSettings } from '@/types';
 import { useHabits } from '@/context/HabitContext';
 import { pomodoroService } from '@/services/pomodoroService';
+import { kanbanService } from '@/services/kanbanService';
 import { notificationService } from '@/services/notificationService';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,7 @@ interface PomodoroSettingsFormProps {
 }
 
 export const PomodoroSettingsForm: React.FC<PomodoroSettingsFormProps> = ({ onSaved }) => {
-  const { pomodoroSettings, updatePomodoroSettings, habits } = useHabits();
+  const { pomodoroSettings, updatePomodoroSettings, habits, kanbanColumns, kanbanTasks } = useHabits();
 
   const [focusMinutes, setFocusMinutes] = useState(pomodoroSettings.focusMinutes);
   const [shortBreakMinutes, setShortBreakMinutes] = useState(pomodoroSettings.shortBreakMinutes);
@@ -26,6 +27,7 @@ export const PomodoroSettingsForm: React.FC<PomodoroSettingsFormProps> = ({ onSa
   const [notificationsEnabled, setNotificationsEnabled] = useState(pomodoroSettings.notificationsEnabled);
   const [soundEnabled, setSoundEnabled] = useState(pomodoroSettings.soundEnabled);
   const [linkedHabitId, setLinkedHabitId] = useState<string>(pomodoroSettings.linkedHabitId || '');
+  const [linkedTaskId, setLinkedTaskId] = useState<string>(pomodoroSettings.linkedTaskId || '');
 
   const [errors, setErrors] = useState<Partial<Record<'focusMinutes' | 'shortBreakMinutes' | 'longBreakMinutes' | 'longBreakInterval', string>>>({});
   const [notificationWarning, setNotificationWarning] = useState('');
@@ -41,6 +43,7 @@ export const PomodoroSettingsForm: React.FC<PomodoroSettingsFormProps> = ({ onSa
     setNotificationsEnabled(pomodoroSettings.notificationsEnabled);
     setSoundEnabled(pomodoroSettings.soundEnabled);
     setLinkedHabitId(pomodoroSettings.linkedHabitId || '');
+    setLinkedTaskId(pomodoroSettings.linkedTaskId || '');
   }, [pomodoroSettings]);
 
   const handleToggleNotifications = async (enabled: boolean) => {
@@ -69,6 +72,7 @@ export const PomodoroSettingsForm: React.FC<PomodoroSettingsFormProps> = ({ onSa
       notificationsEnabled,
       soundEnabled,
       linkedHabitId: linkedHabitId || null,
+      linkedTaskId: linkedTaskId || null,
     };
 
     const validation = pomodoroService.validateSettings(candidate);
@@ -88,7 +92,7 @@ export const PomodoroSettingsForm: React.FC<PomodoroSettingsFormProps> = ({ onSa
     'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="p-5 pb-2">
         <CardTitle className="text-base font-bold flex items-center gap-2">
           <Bell className="w-5 h-5 text-primary" />
@@ -161,6 +165,23 @@ export const PomodoroSettingsForm: React.FC<PomodoroSettingsFormProps> = ({ onSa
               ))}
             </select>
             <p className="text-xs text-muted-foreground">Ciclos de foco concluídos serão registrados para este hábito.</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="pomo-task">Tarefa do quadro vinculada (opcional)</Label>
+            <select id="pomo-task" className={selectClass} value={linkedTaskId} onChange={(e) => setLinkedTaskId(e.target.value)}>
+              <option value="">Nenhum</option>
+              {kanbanService.getColumnsSortedForSelect(kanbanColumns, kanbanTasks).map((group) => (
+                <optgroup key={group.columnId} label={group.columnName}>
+                  {group.tasks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">Ao concluir um foco, você poderá avançar esta tarefa para outra etapa do quadro.</p>
           </div>
 
           <div className="space-y-3">

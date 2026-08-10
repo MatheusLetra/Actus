@@ -1,12 +1,26 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import type { Category, CategoryStat, DashboardStats, Habit, HabitCompletion, PomodoroSession, PomodoroSettings, PomodoroStats } from '@/types';
+import type {
+  Category,
+  CategoryStat,
+  DashboardStats,
+  Habit,
+  HabitCompletion,
+  KanbanBoard,
+  KanbanColumn,
+  KanbanTask,
+  PomodoroSession,
+  PomodoroSettings,
+  PomodoroStats,
+} from '@/types';
 import { categoryRepository } from '@/repositories/categoryRepository';
 import { habitRepository } from '@/repositories/habitRepository';
 import { completionRepository } from '@/repositories/completionRepository';
 import { pomodoroRepository } from '@/repositories/pomodoroRepository';
+import { kanbanRepository } from '@/repositories/kanbanRepository';
 import { seedService } from '@/services/seedService';
 import { statisticsService } from '@/services/statisticsService';
 import { pomodoroService } from '@/services/pomodoroService';
+import { kanbanService } from '@/services/kanbanService';
 import { dateService } from '@/services/dateService';
 
 interface HabitContextType {
@@ -15,22 +29,22 @@ interface HabitContextType {
   completions: HabitCompletion[];
   dashboardStats: DashboardStats;
   categoryStats: CategoryStat[];
-  
+
   // Category Actions
   addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => void;
   updateCategory: (category: Category) => void;
   deleteCategory: (id: string) => { success: boolean; message?: string };
-  
+
   // Habit Actions
   addHabit: (habit: Omit<Habit, 'id' | 'createdAt'>) => void;
   updateHabit: (habit: Habit) => void;
   deleteHabit: (id: string) => void;
   toggleHabitActive: (id: string) => void;
-  
+
   // Completion Actions
   toggleHabitCompletion: (habitId: string, dateStr?: string) => { completed: boolean };
   completeHabitCompletion: (habitId: string, dateStr?: string) => void;
-  
+
   // Pomodoro State & Actions
   pomodoroSettings: PomodoroSettings;
   pomodoroSessions: PomodoroSession[];
@@ -40,7 +54,20 @@ interface HabitContextType {
   updatePomodoroSession: (id: string, updates: Partial<Omit<PomodoroSession, 'id'>>) => void;
   removePomodoroSession: (id: string) => void;
   clearPomodoroSessions: () => void;
-  
+
+  // Kanban State & Actions
+  kanbanBoard: KanbanBoard;
+  kanbanColumns: KanbanColumn[];
+  kanbanTasks: KanbanTask[];
+  updateKanbanBoard: (board: KanbanBoard) => void;
+  addKanbanColumn: (column: Omit<KanbanColumn, 'id' | 'createdAt' | 'order'>) => void;
+  updateKanbanColumn: (column: KanbanColumn) => void;
+  deleteKanbanColumn: (id: string) => void;
+  addKanbanTask: (task: Omit<KanbanTask, 'id' | 'createdAt' | 'updatedAt' | 'order'>) => void;
+  updateKanbanTask: (task: KanbanTask) => void;
+  deleteKanbanTask: (id: string) => void;
+  moveKanbanTask: (taskId: string, targetColumnId: string, targetIndex?: number) => void;
+
   // Admin / Seed Actions
   resetToDemoData: () => void;
   exportData: () => string;
@@ -55,6 +82,9 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(pomodoroService.getDefaultSettings());
   const [pomodoroSessions, setPomodoroSessions] = useState<PomodoroSession[]>([]);
+  const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>(kanbanService.getDefaultBoard);
+  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
+  const [kanbanTasks, setKanbanTasks] = useState<KanbanTask[]>([]);
 
   // Initialize data on mount
   useEffect(() => {
@@ -70,6 +100,9 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     setPomodoroSettings(pomodoroRepository.getSettings());
     setPomodoroSessions(pomodoroRepository.getAll());
+    setKanbanBoard(kanbanRepository.initBoardIfMissing());
+    setKanbanColumns(kanbanRepository.getColumns());
+    setKanbanTasks(kanbanRepository.getTasks());
   }, []);
 
   // Compute Dashboard Stats reactively
@@ -184,6 +217,86 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPomodoroSessions(updated);
   };
 
+  // Kanban Operations
+  const updateKanbanBoard = (board: KanbanBoard) => {
+    const updated = { ...board, updatedAt: new Date().toISOString() };
+    kanbanRepository.saveBoard(updated);
+    setKanbanBoard(updated);
+  };
+
+  const addKanbanColumn = (column: Omit<KanbanColumn, 'id' | 'createdAt' | 'order'>) => {
+    const order = kanbanColumns.length;
+    const newColumn: KanbanColumn = {
+      ...column,
+      id: `col_${Date.now()}`,
+      order,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = kanbanRepository.addColumn(newColumn);
+    setKanbanColumns(kanbanService.reindexColumns(updated));
+  };
+
+  const updateKanbanColumn = (column: KanbanColumn) => {
+    const updated = kanbanRepository.updateColumn(column);
+    setKanbanColumns(updated);
+  };
+
+  const deleteKanbanColumn = (id: string) => {
+    const columns = kanbanRepository.deleteColumn(id);
+    const remainingColumns = kanbanService.sortColumns(columns);
+    let tasks = kanbanRepository.getTasks();
+
+    const orphanTasks = tasks.filter((t) => t.columnId === id);
+    if (orphanTasks.length > 0) {
+      const fallbackColumn = remainingColumns[0];
+      if (fallbackColumn) {
+        tasks = orphanTasks.reduce(
+          (acc, t) => kanbanService.moveTask(acc, t.id, fallbackColumn.id),
+          tasks
+        );
+      } else {
+        tasks = tasks.filter((t) => t.columnId !== id);
+      }
+      kanbanRepository.saveTasks(tasks);
+      setKanbanTasks(tasks);
+    }
+
+    setKanbanColumns(kanbanService.reindexColumns(remainingColumns));
+  };
+
+  const addKanbanTask = (task: Omit<KanbanTask, 'id' | 'createdAt' | 'updatedAt' | 'order'>) => {
+    const columnTasks = kanbanTasks.filter((t) => t.columnId === task.columnId);
+    const newTask: KanbanTask = {
+      ...task,
+      id: `task_${Date.now()}`,
+      order: columnTasks.length,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const updated = kanbanRepository.addTask(newTask);
+    setKanbanTasks(updated);
+  };
+
+  const updateKanbanTask = (task: KanbanTask) => {
+    const updated = kanbanRepository.updateTask({ ...task, updatedAt: new Date().toISOString() });
+    setKanbanTasks(updated);
+  };
+
+  const deleteKanbanTask = (id: string) => {
+    const updated = kanbanRepository.deleteTask(id);
+    setKanbanTasks(updated);
+
+    if (pomodoroSettings.linkedTaskId === id) {
+      updatePomodoroSettings({ ...pomodoroSettings, linkedTaskId: null });
+    }
+  };
+
+  const moveKanbanTask = (taskId: string, targetColumnId: string, targetIndex?: number) => {
+    const updated = kanbanService.moveTask(kanbanTasks, taskId, targetColumnId, targetIndex);
+    kanbanRepository.saveTasks(updated);
+    setKanbanTasks(updated);
+  };
+
   // Reset to Demo
   const resetToDemoData = () => {
     const data = seedService.seedDemoData();
@@ -195,7 +308,17 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Backup & Restore
   const exportData = () => {
     return JSON.stringify(
-      { categories, habits, completions, pomodoroSettings, pomodoroSessions, version: 2 },
+      {
+        categories,
+        habits,
+        completions,
+        pomodoroSettings,
+        pomodoroSessions,
+        kanbanBoard,
+        kanbanColumns,
+        kanbanTasks,
+        version: 3,
+      },
       null,
       2
     );
@@ -227,6 +350,25 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             pomodoroRepository.saveSettings(parsed.pomodoroSettings);
             setPomodoroSettings(parsed.pomodoroSettings);
           }
+        }
+
+        if (
+          parsed.kanbanBoard &&
+          typeof parsed.kanbanBoard === 'object' &&
+          typeof parsed.kanbanBoard.name === 'string'
+        ) {
+          kanbanRepository.saveBoard(parsed.kanbanBoard);
+          setKanbanBoard(parsed.kanbanBoard);
+        }
+
+        if (Array.isArray(parsed.kanbanColumns)) {
+          kanbanRepository.saveAllColumns(parsed.kanbanColumns);
+          setKanbanColumns(parsed.kanbanColumns);
+        }
+
+        if (Array.isArray(parsed.kanbanTasks)) {
+          kanbanRepository.saveAllTasks(parsed.kanbanTasks);
+          setKanbanTasks(parsed.kanbanTasks);
         }
 
         return true;
@@ -262,6 +404,17 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updatePomodoroSession,
         removePomodoroSession,
         clearPomodoroSessions,
+        kanbanBoard,
+        kanbanColumns,
+        kanbanTasks,
+        updateKanbanBoard,
+        addKanbanColumn,
+        updateKanbanColumn,
+        deleteKanbanColumn,
+        addKanbanTask,
+        updateKanbanTask,
+        deleteKanbanTask,
+        moveKanbanTask,
         resetToDemoData,
         exportData,
         importData,

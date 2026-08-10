@@ -2,6 +2,7 @@ import React from 'react';
 import { useHabits } from '@/context/HabitContext';
 import { POMODORO_CYCLE_LABELS } from '@/constants';
 import { usePomodoroTimer } from './usePomodoroTimer';
+import { KanbanAdvanceDialog } from '@/components/kanban/KanbanAdvanceDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +23,7 @@ function formatTime(totalSeconds: number): string {
 }
 
 export const PomodoroTimer: React.FC = () => {
-  const { habits } = useHabits();
+  const { habits, kanbanColumns, kanbanTasks } = useHabits();
   const {
     cycleType,
     remainingSeconds,
@@ -30,6 +31,9 @@ export const PomodoroTimer: React.FC = () => {
     hasStarted,
     activeSession,
     progress,
+    pendingAdvanceTask,
+    confirmAdvanceTask,
+    dismissAdvanceTask,
     start,
     pause,
     resume,
@@ -40,12 +44,13 @@ export const PomodoroTimer: React.FC = () => {
 
   const color = CYCLE_COLORS[cycleType] || CYCLE_COLORS.focus;
   const linkedHabit = activeSession?.habitId ? habits.find((h) => h.id === activeSession.habitId) : undefined;
+  const linkedTask = activeSession?.taskId ? kanbanTasks.find((t) => t.id === activeSession.taskId) : undefined;
   const radius = 110;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progress / 100) * circumference;
 
   return (
-    <Card>
+    <Card className="h-full flex flex-col">
       <CardHeader className="p-5 pb-2">
         <CardTitle className="text-base font-bold flex items-center gap-2">
           <TimerIcon className="w-5 h-5 text-primary" />
@@ -56,7 +61,7 @@ export const PomodoroTimer: React.FC = () => {
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="p-5 flex flex-col items-center gap-6">
+      <CardContent className="p-5 flex-1 flex flex-col items-center justify-center gap-6">
         <div className="relative w-[220px] h-[220px]">
           <svg viewBox="0 0 260 260" className="w-full h-full -rotate-90">
             <circle cx="130" cy="130" r={radius} className="stroke-muted/60" strokeWidth="12" fill="none" />
@@ -84,6 +89,12 @@ export const PomodoroTimer: React.FC = () => {
               <span className="flex items-center gap-1 mt-2 text-xs font-medium text-foreground bg-muted/50 rounded-full px-2.5 py-1">
                 <IconRenderer name={linkedHabit.icon || 'Target'} size={12} style={{ color: linkedHabit.color }} />
                 {linkedHabit.name}
+              </span>
+            )}
+            {linkedTask && (
+              <span className="flex items-center gap-1 mt-2 text-xs font-medium text-foreground bg-muted/50 rounded-full px-2.5 py-1">
+                <IconRenderer name="ListTodo" size={12} style={{ color: 'var(--primary)' }} />
+                {linkedTask.title}
               </span>
             )}
           </div>
@@ -135,6 +146,17 @@ export const PomodoroTimer: React.FC = () => {
           Você pode pausar um ciclo e retomá-lo depois.
         </p>
       </CardContent>
+
+      <KanbanAdvanceDialog
+        open={pendingAdvanceTask !== null}
+        onOpenChange={(open) => {
+          if (!open) dismissAdvanceTask();
+        }}
+        taskTitle={pendingAdvanceTask?.taskTitle ?? ''}
+        currentColumnId={pendingAdvanceTask?.currentColumnId ?? ''}
+        columns={kanbanColumns}
+        onConfirm={confirmAdvanceTask}
+      />
     </Card>
   );
 };

@@ -8,6 +8,7 @@ import { HistoryPage } from '@/pages/History';
 import { SettingsPage } from '@/pages/Settings';
 import { ToolsPage } from '@/pages/Tools';
 import { PomodoroPage } from '@/pages/Pomodoro';
+import { KanbanPage } from '@/pages/Kanban';
 
 const router = createBrowserRouter([
   {
@@ -41,6 +42,10 @@ const router = createBrowserRouter([
       {
         path: 'tools/pomodoro',
         element: <PomodoroPage />,
+      },
+      {
+        path: 'tools/kanban',
+        element: <KanbanPage />,
       },
     ],
   },

@@ -81,11 +81,13 @@ export interface PomodoroSettings {
   notificationsEnabled: boolean;
   soundEnabled: boolean;
   linkedHabitId?: string | null;
+  linkedTaskId?: string | null;
 }
 
 export interface PomodoroSession {
   id: string;
   habitId?: string | null;
+  taskId?: string | null;
   cycleType: PomodoroCycleType;
   plannedSeconds: number;
   remainingSeconds: number;
@@ -124,4 +126,31 @@ export interface PomodoroStats {
   byHabit: PomodoroByHabitStat[];
   dailySeries: PomodoroDailyStat[];
   distribution: PomodoroDistributionStat[];
+}
+
+export interface KanbanBoard {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KanbanColumn {
+  id: string;
+  name: string;
+  color: string;
+  order: number;
+  createdAt: string;
+}
+
+export interface KanbanTask {
+  id: string;
+  columnId: string;
+  title: string;
+  description?: string;
+  habitId?: string | null;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
 }

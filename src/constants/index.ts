@@ -8,6 +8,9 @@ export const STORAGE_KEYS = {
   initialized: 'actus:initialized',
   pomodoroSettings: 'actus:pomodoroSettings',
   pomodoroSessions: 'actus:pomodoroSessions',
+  kanbanBoard: 'actus:kanbanBoard',
+  kanbanColumns: 'actus:kanbanColumns',
+  kanbanTasks: 'actus:kanbanTasks',
 } as const;
 
 export const POMODORO_CYCLE_LABELS: Record<PomodoroCycleType, string> = {
@@ -70,4 +73,10 @@ export const DAYS_OF_WEEK = [
   { id: 4, short: 'Qui', full: 'Quinta-feira' },
   { id: 5, short: 'Sex', full: 'Sexta-feira' },
   { id: 6, short: 'Sáb', full: 'Sábado' },
+] as const;
+
+export const KANBAN_DEFAULT_COLUMNS = [
+  { name: 'A Fazer', color: '#ef4444' },
+  { name: 'Em Andamento', color: '#f59e0b' },
+  { name: 'Concluído', color: '#10b981' },
 ] as const;
