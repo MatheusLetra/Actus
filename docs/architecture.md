@@ -58,12 +58,15 @@ src/
 ├── utils/            cn() (clsx + tailwind-merge)
 ├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService
 ├── services/         notificationService, audioService (helpers de browser — não puros)
+├── services/         syncMergeService (merge puro de snapshots p/ sincronização)
+├── services/firebase config.ts, authService.ts, syncService.ts (helpers de browser — não puros)
 ├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository
-├── context/          ThemeContext, HabitContext
+├── context/          ThemeContext, HabitContext, FirebaseContext
 ├── components/
 │   ├── ui/           Primitivas Shadcn (button, card, dialog, sheet, badge, progress, switch, input, label)
 │   ├── common/       IconRenderer, IconPicker, ColorPicker, DeleteConfirmDialog, EmptyState
 │   ├── layout/       AppLayout, Sidebar, Header
+│   ├── settings/     CloudSyncCard (login/sync Google)
 │   ├── dashboard/    TodayHabitItem
 │   ├── habits/       HabitCard, HabitFormDialog, CalendarHeatmap
 │   ├── categories/   CategoryCard, CategoryFormDialog
@@ -149,6 +152,15 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 - Tarefa pode vincular um hábito opcionalmente (`KanbanTask.habitId`); badge com ícone/cor do hábito no card.
 - `deleteKanbanColumn` move as tarefas órfãs para a primeira coluna restante (ou exclui se não houver colunas); `deleteKanbanTask` limpa `linkedTaskId` das configurações do pomodoro.
 - Backup/restore: `exportData` gera `version: 3` com kanban; `importData` restaura quando presente e válido (retrocompatível v1/v2).
+
+## Sincronização com Google / Firebase
+
+- **Autenticação**: Firebase Auth com `GoogleAuthProvider` (`src/services/firebase/authService.ts`); estado via `onAuthStateChanged`; sessão persistida no navegador. Credenciais em `.env` (`VITE_FIREBASE_*`), lidas em `src/services/firebase/config.ts` (sem `initializeApp` se ausentes, e o card é ocultado).
+- **Persistência remota**: Cloud Firestore com núcleo por usuário (`users/{uid}`: categories, habits, settings, kanban) e **subcoleções mensais** para as listas que crescem (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) — evita o limite de 1 MB/documento. `syncService.readSnapshot` recombina os meses; `writeSnapshot` reparticiona e remove meses órfãos.
+- **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). Guarda anti-eco via `lastWrittenUpdatedAtRef`.
+- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item (timestamp próprio `updatedAt`/`completedAt` se houver, senão `updatedAt` do snapshot); completions unem por `habitId+date` preferindo `completed:true`; kanban reordenado/reindexado no merge.
+- **Regras Firestore** no console: `match /users/{userId}` + subcoleções com `allow read, write: if request.auth.uid == userId`.
+- **UI**: `CloudSyncCard` em Configurações (login, "Sincronizar agora", "Sair"); rodapé da página indica status de sync.
 
 ## Padrões de Código
 

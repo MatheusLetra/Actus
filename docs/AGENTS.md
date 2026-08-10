@@ -4,7 +4,7 @@ Instruções para agentes que trabalham neste repositório. Baseadas na análise
 
 ## Visão Geral
 
-Aplicação web **Controle de Hábitos Pessoais** — cadastro, acompanhamento e análise de hábitos diários com streaks, estatísticas e gráficos. **100% no navegador (offline-first)**, persistência total via `localStorage`. Inclui **Ferramentas Úteis** (menu na Sidebar), com as ferramentas **Pomodoro** (timer configurável, registro de ciclos, notificações/som e gráficos de métricas) e **Quadro Kanban** (colunas/tarefas personalizáveis com drag and drop).
+Aplicação web **Controle de Hábitos Pessoais** — cadastro, acompanhamento e análise de hábitos diários com streaks, estatísticas e gráficos. **100% no navegador (offline-first)**, persistência total via `localStorage`. Inclui **Ferramentas Úteis** (menu na Sidebar), com as ferramentas **Pomodoro** (timer configurável, registro de ciclos, notificações/som e gráficos de métricas) e **Quadro Kanban** (colunas/tarefas personalizáveis com drag and drop). Opcionalmente, há **login com Google** que sincroniza os dados com o **Firebase/Cloud Firestore** (credenciais em `.env`) — ver `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md`.
 
 ## Stack / Tecnologias
 
@@ -54,12 +54,15 @@ src/
 ├── utils/            cn() (clsx + tailwind-merge)
 ├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService
 ├── services/         notificationService, audioService (helpers de browser — não puros)
+├── services/         syncMergeService.ts (merge puro de snapshots p/ sincronização)
+├── services/firebase config.ts, authService.ts, syncService.ts (helpers de browser — não puros)
 ├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository
-├── context/          ThemeContext, HabitContext
+├── context/          ThemeContext, HabitContext, FirebaseContext
 ├── components/
 │   ├── ui/           Primitivas Shadcn (button, card, dialog, sheet, badge, progress, switch, input, label)
 │   ├── common/       IconRenderer, IconPicker, ColorPicker, DeleteConfirmDialog, EmptyState
 │   ├── layout/       AppLayout, Sidebar, Header
+│   ├── settings/     CloudSyncCard (login/sync Google)
 │   ├── dashboard/    TodayHabitItem
 │   ├── habits/       HabitCard, HabitFormDialog, CalendarHeatmap
 │   ├── categories/   CategoryCard, CategoryFormDialog
@@ -69,10 +72,10 @@ src/
 │   └── charts/       Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart, PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
 ├── pages/            Dashboard, Habits, Categories, Tools, Pomodoro, Kanban, History, Settings
 ├── routes/           Configuração do React Router
-└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts
+└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts, syncMergeService.test.ts
 ```
 
-Arquivos de configuração raiz: `package.json`, `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `index.html`, `.gitignore`, `docs/PLANO-IMPLEMENTACAO-POMODORO.md` e `docs/PLANO-IMPLEMENTACAO-QUADRO-KANBAN.md` (rastreamento do Pomodoro e do Kanban). Ativo de áudio em `public/pomodoro-chime.wav`.
+Arquivos de configuração raiz: `package.json`, `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `index.html`, `.gitignore`, `docs/PLANO-IMPLEMENTACAO-POMODORO.md`, `docs/PLANO-IMPLEMENTACAO-QUADRO-KANBAN.md` e `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md` (rastreamento de Pomodoro, Kanban e Sincronização). Ativo de áudio em `public/pomodoro-chime.wav`. Credenciais de Firebase em `.env` (não versionado) e `.env.example` (placeholders).
 
 ## Padrões de Código
 
@@ -117,7 +120,7 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 ## Testes
 
 - Framework: **Vitest**; arquivos em `src/tests/*.test.ts`.
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts` e `kanbanService.test.ts` (25 testes — datas, streaks, pomodoro e kanban).
+- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts` e `syncMergeService.test.ts` (37 testes — datas, streaks, pomodoro, kanban e merge de sincronização).
 - Testes existentes importam serviços diretamente (sem setup especial, sem jsdom).
 - Para adicionar testes de novos serviços, criar `src/tests/<nome>.test.ts` seguindo o mesmo estilo (`describe`/`it`/`expect`).
 - **Validar sempre**: `npm run test:run` antes de finalizar alterações.
@@ -132,6 +135,8 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 - `deleteKanbanColumn` move as tarefas da coluna para a primeira coluna restante; `deleteKanbanTask` limpa `linkedTaskId` do pomodoro.
 - Notificações usam `Notification` API; se o navegador bloquear a permissão, o form reverte o toggle e exibe aviso.
 - `audioService.playChime` tenta `public/pomodoro-chime.wav` e cai para chime via Web Audio se falhar.
+- Firebase: credenciais via `.env` (`VITE_FIREBASE_*`); sem credenciais, `initializeApp` não roda (`services/firebase/config.ts`) e o card de sincronização fica oculto. Erros de sync usam `getErrorMessage` (PT-BR); popup fechado/cancelado é silencioso.
+- Sync (chaves `actus:syncUser`, `actus:lastSyncAt`): Firestore com núcleo `users/{uid}` + subcoleções mensais; `syncMergeService.mergeSnapshots` união + last-writer-wins; guarda anti-eco via `updatedAt`.
 - Formulários validam campos obrigatórios e exibem mensagens de erro em PT-BR.
 - `IconRenderer` possui fallback de ícone (padrão `Target`); gráficos e `EmptyState` tratam listas vazias.
 

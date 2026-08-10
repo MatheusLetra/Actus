@@ -1,16 +1,19 @@
 import React, { useRef, useState } from 'react';
 import { useTheme } from '@/context/ThemeContext';
 import { useHabits } from '@/context/HabitContext';
+import { useFirebase } from '@/context/FirebaseContext';
 import type { Theme } from '@/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Sun, Moon, Monitor, Download, Upload, RotateCcw, ShieldCheck, HardDrive } from 'lucide-react';
+import { Sun, Moon, Monitor, Download, Upload, RotateCcw, ShieldCheck, HardDrive, Cloud, RefreshCw } from 'lucide-react';
 import { DeleteConfirmDialog } from '@/components/common/DeleteConfirmDialog';
+import { CloudSyncCard } from '@/components/settings/CloudSyncCard';
 import { cn } from '@/utils/cn';
 
 export const SettingsPage: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const { exportData, importData, resetToDemoData, habits, categories, completions } = useHabits();
+  const { user, lastSyncAt } = useFirebase();
 
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -47,6 +50,9 @@ export const SettingsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-4xl animate-in fade-in duration-300">
+      {/* Section 0: Google Cloud Sync */}
+      <CloudSyncCard />
+
       {/* Section 1: Appearance & Theme */}
       <Card>
         <CardHeader>
@@ -158,8 +164,18 @@ export const SettingsPage: React.FC = () => {
       <Card className="bg-muted/20">
         <CardContent className="p-4 flex items-center justify-between text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>Persistência 100% Local (Navegador)</span>
+            {user ? (
+              <>
+                <Cloud className="w-4 h-4 text-primary" />
+                <span>Local + Nuvem (Google){lastSyncAt ? ' · sincronizado' : ''}</span>
+                <RefreshCw className="w-3.5 h-3.5" />
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <span>Persistência 100% Local (Navegador)</span>
+              </>
+            )}
           </div>
 
           <div>

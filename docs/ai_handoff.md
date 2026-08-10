@@ -4,11 +4,76 @@ Documento de handoff para retomar o trabalho no repositório a partir de onde pa
 
 ## Estado atual
 
-O projeto base está completo e as features **Pomodoro** e **Quadro Kanban** foram implementadas, com **todas as etapas concluídas e validadas**:
+O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **Sincronização com Google/Firebase** foram implementadas, com **todas as etapas concluídas e validadas**:
 
 - Pomodoro (etapas 1–10 + evoluções da segunda rodada): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-POMODORO.md`.
 - Quadro Kanban (etapas 1–9): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-QUADRO-KANBAN.md`.
-- Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **25/25 testes** (4 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
+- Sincronização Google/Firebase: `[x]` — ver `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md`.
+- Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **37/37 testes** (5 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
+
+## O que foi implementado (resumo — rodada mais recente: Sincronização Google)
+
+- **Login com Google** na tela Configurações (card "Sincronização com a Nuvem"): Firebase Authentication (`signInWithPopup`), sessão restaurada via `onAuthStateChanged`, logout com confirmação.
+- **Cloud Firestore** com documento núcleo por usuário (`users/{uid}`) + **subcoleções mensais** (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) para não estourar o limite de 1 MB/documento.
+- **Sincronização bidirecional**: merge por item (união + last-writer-wins) sem perder dados locais no login; no novo dispositivo a nuvem desce para o localStorage. Push com debounce (~800 ms) + `onSnapshot` em tempo real com guarda anti-eco.
+- **Credenciais via `.env`** (não versionado) + `.env.example`; `.gitignore` atualizado.
+- **Aplicação no dispositivo**: `FirebaseProvider` dentro de `HabitProvider` em `src/App.tsx`; reuso do `importData()` existente para aplicar merges.
+
+## Arquivos-chave criados/modificados (rodada Sincronização)
+
+**Criados:**
+- `src/services/firebase/config.ts` · `authService.ts` · `syncService.ts`
+- `src/services/syncMergeService.ts` (merge puro)
+- `src/context/FirebaseContext.tsx`
+- `src/components/settings/CloudSyncCard.tsx`
+- `src/tests/syncMergeService.test.ts` (12 testes)
+- `.env` / `.env.example`
+
+**Modificados:**
+- `package.json` (dep `firebase@^12.17.1` — aprovado)
+- `.gitignore` (`.env`, `.env.*` exceto `.env.example`)
+- `src/constants/index.ts` (`STORAGE_KEYS.syncUser`, `lastSyncAt`)
+- `src/App.tsx` (FirebaseProvider)
+- `src/pages/Settings/index.tsx` (CloudSyncCard + rodapé com status de sync)
+
+## Decisões de implementação (lembrar)
+
+- **Scharding**: `completions` e `pomodoroSessions` são particionadas por mês (`YYYY-MM`) nas subcoleções Firestore; `readSnapshot` recombinar e `writeSnapshot` reparticiona (+ remove meses órfãos). Merge opera sobre arrays completos em memória.
+- **Merge**: items só de um lado são sempre preservados (união); item em ambos vence pela versão com timestamp mais recente (por item quando houver `updatedAt`/`completedAt`, senão pelo `updatedAt` global do snapshot). Completions unem por `habitId+date` preferindo `completed:true`. Kanban é reordenado/reindexado após o merge.
+- **Antieco**: `lastWrittenUpdatedAtRef` compara `updatedAt`; push gravado com `updatedAt = Date.now()`; ao aplicar snapshot remoto mais novo, o write-back preserva o `updatedAt` remoto para convergir sem loop.
+- **Firestore rules** (aplicar no console): `match /users/{userId}` + subcoleções, `allow read, write: if request.auth.uid == userId`.
+- **Chunk size**: o bundle subiu para ~2,1 MB (Firebase ~+600 kB gzip). Aviso pré-existente. Código-splitting (import dinâmico do Firebase) é evolução pendente opcional.
+
+## Correções de bugs (rodada 4 — Kanban mobile)
+
+- **Badges do log de ciclos sobrepondo o texto "Foco"**: itens flex-col no mobile; `max-w-28 sm:max-w-40`.
+- **Kanban no mobile**: colunas empilham verticalmente (`flex-col`) e lado a lado no desktop (`lg:flex-row`).
+- **Drag and drop no mobile**: `MouseSensor` + `TouchSensor` com delay/tolerância.
+- **Botões editar/excluir no mobile**: visíveis sem hover (`opacity-100 sm:opacity-0 sm:group-hover:opacity-100`).
+- **Header Kanban estourando no mobile**: container `flex-wrap`.
+
+## Evoluções pendentes (não implementadas)
+
+- Código-splitting do Firebase (import dinâmico) para reduzir o bundle inicial.
+- Expor métricas de pomodoro no Dashboard.
+- Permitir selecionar o hábito vinculado **por sessão**.
+- Reagendar/editar ciclos registrados retroativamente.
+- Múltiplos quadros Kanban (o modelo de dados já permite; UI atual é de quadro único).
+- Estatísticas de tarefas por coluna/quadro.
+
+## Como retomar
+
+1. Ler `docs/AGENTS.md` e `docs/architecture.md` para contexto e convenções.
+2. Confirmar o estado de `git status` e os arquivos modificados.
+3. Escolher uma evolução pendente da lista acima.
+4. Seguir o fluxo do AGENTS.md: types → service puro → repository → contexto → UI/página/rota → testes.
+5. Validar: `npm run lint` → `npm run test:run` → `npm run build`.
+
+## Validação atual (rodada mais recente)
+
+- `npm run lint` — sem erros de tipo.
+- `npm run test:run` — 5 arquivos, **37 testes** passando.
+- `npm run build` — gerado com sucesso (chunk > 500 kB: aviso de tamanho, não é erro).
 
 ## O que foi implementado (resumo — rodada mais recente: Quadro Kanban)
 

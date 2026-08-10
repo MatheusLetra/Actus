@@ -11,6 +11,8 @@ export const STORAGE_KEYS = {
   kanbanBoard: 'actus:kanbanBoard',
   kanbanColumns: 'actus:kanbanColumns',
   kanbanTasks: 'actus:kanbanTasks',
+  syncUser: 'actus:syncUser',
+  lastSyncAt: 'actus:lastSyncAt',
 } as const;
 
 export const POMODORO_CYCLE_LABELS: Record<PomodoroCycleType, string> = {
