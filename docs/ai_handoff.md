@@ -4,6 +4,15 @@ Documento de handoff para retomar o trabalho no repositório a partir de onde pa
 
 ## Estado atual
 
+### Fundação de Project
+
+- `Project` é entidade própria, com nome, cor controlada, `createdAt` e `updatedAt`.
+- `KanbanTask.projectId` é opcional, com no máximo um projeto por tarefa; tarefas legadas continuam válidas.
+- Projects persistem em `actus:projects`, participam do backup v3, `ActusData`, merge LWW e tombstones.
+- Exclusão de Project remove associações das tarefas e impede ressurreição durante merge offline.
+- Projects viajam no core Firebase existente, sem path, shard ou listener novo; `pushCoordinator` não foi alterado.
+- Gerenciamento, seletor no Task Dialog e badge textual com indicador de cor foram implementados. Filtro permanece fora do MVP.
+
 O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **Sincronização com Google/Firebase** foram implementadas, com **todas as etapas concluídas e validadas**:
 
 - Pomodoro (etapas 1–10 + evoluções da segunda rodada): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-POMODORO.md`.
@@ -103,7 +112,7 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 
 - **Nova ferramenta "Quadro Kanban"** no menu Ferramentas Úteis (rota `/tools/kanban`), ao lado do Pomodoro.
 - **Quadro único** com colunas totalmente personalizáveis (nome + cor via `ColorPicker`), tarefas ordenáveis por **drag and drop** (dentro e entre colunas) usando `@dnd-kit/core` + `@dnd-kit/sortable`.
-- **Modais** de cadastro/edição: coluna (`KanbanColumnFormDialog`), tarefa (`KanbanTaskFormDialog` — título, descrição, etapa, hábito vinculado opcional) e quadro (`KanbanBoardSettingsDialog`).
+- **Modais** de cadastro/edição: coluna (`KanbanColumnFormDialog`), tarefa (`KanbanTaskFormDialog` — título, descrição, etapa, hábito e projeto vinculados opcionalmente), Projects (`KanbanProjectManagerDialog`) e quadro (`KanbanBoardSettingsDialog`).
 - **Vínculo opcional de hábito por tarefa**: `KanbanTask.habitId`; badge exibe o hábito no card.
 - **Integração Pomodoro × Kanban**: novo vínculo "Tarefa do quadro" no `PomodoroSettingsForm` (mantém o hábito existente); `PomodoroSession.taskId` registra o vínculo; ao concluir um foco, `KanbanAdvanceDialog` pergunta se deseja avançar a tarefa e lista as colunas destino (exceto a atual).
 - **Persistência**: 3 chaves novas (`actus:kanbanBoard`, `actus:kanbanColumns`, `actus:kanbanTasks`), repositories via `storageService`.

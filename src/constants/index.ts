@@ -3,6 +3,7 @@ import type { PomodoroCycleType } from '@/types';
 export const STORAGE_KEYS = {
   habits: 'actus:habits',
   categories: 'actus:categories',
+  projects: 'actus:projects',
   completions: 'actus:completions',
   theme: 'actus:theme',
   initialized: 'actus:initialized',

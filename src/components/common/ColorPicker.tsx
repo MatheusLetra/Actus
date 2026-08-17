@@ -19,11 +19,13 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ selectedColor, onSelec
             type="button"
             onClick={() => onSelectColor(c.value)}
             className={cn(
-              'w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer hover:scale-110 shadow-xs',
+              'w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer hover:scale-110 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
               isSelected ? 'ring-2 ring-offset-2 ring-primary scale-110' : 'opacity-80 hover:opacity-100'
             )}
             style={{ backgroundColor: c.value }}
             title={c.name}
+            aria-label={`Selecionar cor ${c.name}`}
+            aria-pressed={isSelected}
           >
             {isSelected && <Check className="w-4 h-4 text-white drop-shadow-md" />}
           </button>

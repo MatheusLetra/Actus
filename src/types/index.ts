@@ -8,6 +8,14 @@ export interface Category {
   createdAt: string;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Habit {
   id: string;
   name: string;
@@ -33,6 +41,7 @@ export interface HabitCompletion {
 
 export type TombstoneKind =
   | 'category'
+  | 'project'
   | 'habit'
   | 'completion'
   | 'pomodoroSession'
@@ -169,6 +178,7 @@ export interface KanbanTask {
   title: string;
   description?: string;
   habitId?: string | null;
+  projectId?: string | null;
   order: number;
   createdAt: string;
   updatedAt: string;

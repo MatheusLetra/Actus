@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Habit, KanbanColumn, KanbanTask } from '@/types';
+import type { Habit, KanbanColumn, KanbanTask, Project } from '@/types';
 import { kanbanService } from '@/services/kanbanService';
 import { useHabits } from '@/context/HabitContext';
 import {
@@ -20,6 +20,7 @@ interface KanbanBoardProps {
   columns: KanbanColumn[];
   tasks: KanbanTask[];
   habits: Habit[];
+  projects: Project[];
   onEditColumn: (column: KanbanColumn) => void;
   onDeleteColumn: (column: KanbanColumn) => void;
   onAddTask: (column: KanbanColumn) => void;
@@ -31,6 +32,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   columns,
   tasks,
   habits,
+  projects,
   onEditColumn,
   onDeleteColumn,
   onAddTask,
@@ -74,6 +76,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   };
 
   const habitById = (habitId: string | null | undefined) => habits.find((h) => h.id === habitId);
+  const projectById = (projectId: string | null | undefined) => projects.find((project) => project.id === projectId);
 
   return (
     <DndContext
@@ -90,6 +93,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             column={column}
             tasks={tasks.filter((t) => t.columnId === column.id)}
             habits={habits}
+            projects={projects}
             onEditColumn={onEditColumn}
             onDeleteColumn={onDeleteColumn}
             onAddTask={onAddTask}
@@ -104,6 +108,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           <KanbanTaskCard
             task={activeTask}
             habit={habitById(activeTask.habitId)}
+            project={projectById(activeTask.projectId)}
             overlay
             onEdit={() => {}}
             onDelete={() => {}}

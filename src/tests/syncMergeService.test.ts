@@ -7,6 +7,7 @@ import type {
   KanbanTask,
   PomodoroSession,
   PomodoroSettings,
+  Project,
   SyncTombstone,
 } from '../types';
 import { syncMergeService, type ActusSnapshot } from '../services/syncMergeService';
@@ -74,6 +75,17 @@ function task(overrides: Partial<KanbanTask> = {}): KanbanTask {
   };
 }
 
+function project(overrides: Partial<Project> = {}): Project {
+  return {
+    id: 'project_1',
+    name: 'Actus',
+    color: '#8b5cf6',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    ...overrides,
+  };
+}
+
 function settings(overrides: Partial<PomodoroSettings> = {}): PomodoroSettings {
   return { ...pomodoroService.getDefaultSettings(), ...overrides };
 }
@@ -83,6 +95,7 @@ function snapshot(overrides: Partial<ActusSnapshot> = {}): ActusSnapshot {
     version: 3,
     updatedAt: 1000,
     categories: [],
+    projects: [],
     habits: [],
     completions: [],
     pomodoroSettings: settings(),
@@ -117,6 +130,33 @@ describe('syncMergeService', () => {
     const remote = snapshot({ habits: [habit({ id: 'habit_remote' })] });
     const merged = syncMergeService.mergeSnapshots(local, remote);
     expect(merged!.habits.map((h) => h.id).sort()).toEqual(['habit_local', 'habit_remote']);
+  });
+
+  it('should merge projects by their own updatedAt and keep deterministic order', () => {
+    const local = snapshot({
+      projects: [project({ id: 'project_b', createdAt: '2026-08-02T00:00:00.000Z', updatedAt: newerIso, name: 'Local' })],
+    });
+    const remote = snapshot({
+      projects: [
+        project({ id: 'project_a', createdAt: '2026-08-01T00:00:00.000Z' }),
+        project({ id: 'project_b', updatedAt: nowIso, name: 'Remoto' }),
+      ],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.projects.map((item) => item.id)).toEqual(['project_a', 'project_b']);
+    expect(merged!.projects.find((item) => item.id === 'project_b')?.name).toBe('Local');
+  });
+
+  it('should resolve a project timestamp tie deterministically', () => {
+    const local = snapshot({ projects: [project({ name: 'A' })] });
+    const remote = snapshot({ projects: [project({ name: 'B' })] });
+
+    const first = syncMergeService.mergeSnapshots(local, remote);
+    const second = syncMergeService.mergeSnapshots(remote, local);
+
+    expect(first!.projects).toEqual(second!.projects);
   });
 
   it('should keep the newer version of an item present on both sides', () => {
@@ -335,6 +375,34 @@ describe('syncMergeService', () => {
     expect(merged!.kanbanTasks.map((t) => t.order)).toEqual([0, 1]);
   });
 
+  it('should normalize task references to missing projects', () => {
+    const merged = syncMergeService.mergeSnapshots(
+      snapshot({ kanbanTasks: [task({ projectId: 'project_missing' })] }),
+      snapshot()
+    );
+
+    expect(merged!.kanbanTasks[0].projectId).toBeNull();
+  });
+
+  it('should not resurrect a deleted project from an offline device', () => {
+    const deletedAt = dateMs('2026-08-17T15:00:00.000Z');
+    const local = snapshot({
+      projects: [],
+      kanbanTasks: [task({ projectId: null, updatedAt: '2026-08-17T15:01:00.000Z' })],
+      tombstones: [tombstone('project', 'project_1', deletedAt)],
+    });
+    const remote = snapshot({
+      projects: [project({ id: 'project_1', createdAt: oldIso, updatedAt: oldIso })],
+      kanbanTasks: [task({ projectId: 'project_1', updatedAt: oldIso })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.projects).toHaveLength(0);
+    expect(merged!.tombstones).toEqual([tombstone('project', 'project_1', deletedAt)]);
+    expect(merged!.kanbanTasks[0].projectId).toBeNull();
+  });
+
   it('should detect data equality by serialization', () => {
     const a = snapshot({ habits: [habit()] });
     const b = snapshot({ habits: [habit()] });
@@ -450,6 +518,16 @@ describe('syncMergeService', () => {
   it('should default tombstones to an empty array in buildData', () => {
     const data = syncMergeService.buildData({ categories: [] });
     expect(data.tombstones).toEqual([]);
+  });
+
+  it('should default projects to an empty array in buildData', () => {
+    const data = syncMergeService.buildData({ categories: [] });
+    expect(data.projects).toEqual([]);
+  });
+
+  it('should preserve projects in the serialized domain snapshot', () => {
+    const data = syncMergeService.buildData({ categories: [], projects: [project()] });
+    expect(JSON.parse(syncMergeService.dataToJson(data)).projects).toEqual(data.projects);
   });
 
   it('should remove undefined values recursively without mutating the input', () => {

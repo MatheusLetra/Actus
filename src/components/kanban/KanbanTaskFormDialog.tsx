@@ -26,12 +26,13 @@ export const KanbanTaskFormDialog: React.FC<KanbanTaskFormDialogProps> = ({
   taskToEdit,
   defaultColumnId,
 }) => {
-  const { habits, kanbanColumns, addKanbanTask, updateKanbanTask } = useHabits();
+  const { habits, projects, kanbanColumns, addKanbanTask, updateKanbanTask } = useHabits();
 
   const [columnId, setColumnId] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [habitId, setHabitId] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [error, setError] = useState('');
 
   const sortedColumns = kanbanService.sortColumns(kanbanColumns);
@@ -42,11 +43,13 @@ export const KanbanTaskFormDialog: React.FC<KanbanTaskFormDialogProps> = ({
       setTitle(taskToEdit.title);
       setDescription(taskToEdit.description || '');
       setHabitId(taskToEdit.habitId || '');
+      setProjectId(taskToEdit.projectId || '');
     } else {
       setColumnId(defaultColumnId || sortedColumns[0]?.id || '');
       setTitle('');
       setDescription('');
       setHabitId('');
+      setProjectId('');
     }
     setError('');
   }, [taskToEdit, open, defaultColumnId]);
@@ -54,12 +57,14 @@ export const KanbanTaskFormDialog: React.FC<KanbanTaskFormDialogProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const selectedProjectId = projectId && projects.some((project) => project.id === projectId) ? projectId : null;
     const candidate: KanbanTask = {
       id: taskToEdit?.id ?? '',
       columnId,
       title: title.trim(),
       description: description.trim() || undefined,
       habitId: habitId || null,
+      projectId: selectedProjectId,
       order: taskToEdit?.order ?? 0,
       createdAt: taskToEdit?.createdAt ?? '',
       updatedAt: taskToEdit?.updatedAt ?? '',
@@ -84,6 +89,7 @@ export const KanbanTaskFormDialog: React.FC<KanbanTaskFormDialogProps> = ({
         title: title.trim(),
         description: description.trim() || undefined,
         habitId: habitId || null,
+        projectId: selectedProjectId,
       });
     }
 
@@ -117,6 +123,24 @@ export const KanbanTaskFormDialog: React.FC<KanbanTaskFormDialogProps> = ({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="kanban-task-project">Projeto (opcional)</Label>
+            <select
+              id="kanban-task-project"
+              className={selectClass}
+              value={projectId && projects.some((project) => project.id === projectId) ? projectId : ''}
+              onChange={(event) => setProjectId(event.target.value)}
+            >
+              <option value="">Nenhum</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">Use um projeto para identificar visualmente esta tarefa.</p>
           </div>
 
           <div className="space-y-1.5">

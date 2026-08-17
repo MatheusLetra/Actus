@@ -41,6 +41,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     kanbanBoard,
     kanbanColumns,
     kanbanTasks,
+    projects,
     tombstones,
     importData,
   } = useHabits();
@@ -64,6 +65,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     kanbanBoard,
     kanbanColumns,
     kanbanTasks,
+    projects,
     tombstones,
   });
   dataRef.current = {
@@ -76,6 +78,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     kanbanBoard,
     kanbanColumns,
     kanbanTasks,
+    projects,
     tombstones,
   };
 
@@ -89,8 +92,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const pushCoordinatorRef = useRef<PushCoordinator<ActusData> | null>(null);
 
   const localSerialized = useMemo(
-    () => JSON.stringify({ categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, tombstones }),
-    [categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, tombstones]
+    () => JSON.stringify({ categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, projects, tombstones }),
+    [categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, projects, tombstones]
   );
 
   const stopWatch = () => {

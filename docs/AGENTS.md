@@ -38,7 +38,7 @@ main.tsx ──> App.tsx
 ```
 
 Regras de arquitetura:
-- **Services são puros**: `dateService`, `streakService`, `statisticsService`, `seedService`, `pomodoroService`, `kanbanService` não dependem de React nem de componentes.
+- **Services são puros**: `dateService`, `streakService`, `statisticsService`, `seedService`, `pomodoroService`, `kanbanService`, `projectService` não dependem de React nem de componentes.
 - **Helpers de browser separados**: `notificationService` (Notification API) e `audioService` (toca `public/pomodoro-chime.wav`, com fallback via Web Audio) são utilitários que acessam APIs do navegador — **não** são serviços puros e não devem conter lógica de negócio.
 - **Repositories isolam a UI do `localStorage`**: páginas e componentes **nunca** chamam `localStorage` diretamente — passam por `storageService` + repositories.
 - **Contexto concentra o estado e as ações**: componentes chamam funções do contexto (`useHabits()`), que gravam no storage e atualizam o estado.
@@ -49,14 +49,14 @@ Regras de arquitetura:
 ```
 src/
 ├── main.tsx / App.tsx / index.css
-├── types/            Interfaces estritas (Category, Habit, HabitCompletion, stats, pomodoro, kanban)
+├── types/            Interfaces estritas (Category, Project, Habit, HabitCompletion, stats, pomodoro, kanban)
 ├── constants/        STORAGE_KEYS, AVAILABLE_ICONS, COLOR_OPTIONS, DAYS_OF_WEEK, labels/cores pomodoro, KANBAN_DEFAULT_COLUMNS
 ├── utils/            cn() (clsx + tailwind-merge)
-├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService
+├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService, projectService
 ├── services/         notificationService, audioService (helpers de browser — não puros)
 ├── services/         syncMergeService.ts (merge puro de snapshots p/ sincronização)
 ├── services/firebase config.ts, authService.ts, syncService.ts (helpers de browser — não puros)
-├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository, tombstoneRepository
+├── repositories/     storageService, habitRepository, categoryRepository, projectRepository, completionRepository, pomodoroRepository, kanbanRepository, tombstoneRepository
 ├── context/          ThemeContext, HabitContext, FirebaseContext
 ├── components/
 │   ├── ui/           Primitivas Shadcn (button, card, dialog, sheet, badge, progress, switch, input, label)
@@ -68,7 +68,7 @@ src/
 │   ├── categories/   CategoryCard, CategoryFormDialog
 │   ├── pomodoro/     PomodoroTimer, PomodoroSettingsForm, PomodoroSessionLog, usePomodoroTimer
 │   ├── kanban/       KanbanBoard, KanbanColumn, KanbanTaskCard (+ KanbanTaskCardContent p/ overlay), KanbanColumnFormDialog,
-│   │                 KanbanTaskFormDialog, KanbanBoardSettingsDialog, KanbanAdvanceDialog
+│   │                 KanbanTaskFormDialog, KanbanProjectManagerDialog, KanbanBoardSettingsDialog, KanbanAdvanceDialog
 │   └── charts/       Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart, PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
 ├── pages/            Dashboard, Habits, Categories, Tools, Pomodoro, Kanban, History, Settings
 ├── routes/           Configuração do React Router
@@ -120,7 +120,7 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 ## Testes
 
 - Framework: **Vitest**; arquivos em `src/tests/*.test.ts`.
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts`, `syncMergeService.test.ts` e `habitRepository.test.ts` (73 testes — datas, streaks, pomodoro, kanban, versionamento de hábitos, comparação de snapshots e merge de sincronização).
+- Cobertura atual: testes de datas, streaks, pomodoro, kanban, projetos, repositories e sincronização (102 testes — incluindo merge, tombstones e compatibilidade de Project).
 - Testes existentes importam serviços diretamente (sem setup especial, sem jsdom).
 - Para adicionar testes de novos serviços, criar `src/tests/<nome>.test.ts` seguindo o mesmo estilo (`describe`/`it`/`expect`).
 - **Validar sempre**: `npm run test:run` antes de finalizar alterações.

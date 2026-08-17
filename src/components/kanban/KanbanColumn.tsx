@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Habit, KanbanColumn as KanbanColumnType, KanbanTask } from '@/types';
+import type { Habit, KanbanColumn as KanbanColumnType, KanbanTask, Project } from '@/types';
 import { kanbanService } from '@/services/kanbanService';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -12,6 +12,7 @@ interface KanbanColumnProps {
   column: KanbanColumnType;
   tasks: KanbanTask[];
   habits: Habit[];
+  projects: Project[];
   onEditColumn: (column: KanbanColumnType) => void;
   onDeleteColumn: (column: KanbanColumnType) => void;
   onAddTask: (column: KanbanColumnType) => void;
@@ -23,6 +24,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   column,
   tasks,
   habits,
+  projects,
   onEditColumn,
   onDeleteColumn,
   onAddTask,
@@ -32,6 +34,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const sortedTasks = kanbanService.sortTasks(tasks);
   const habitById = (habitId: string | null | undefined) => habits.find((h) => h.id === habitId);
+  const projectById = (projectId: string | null | undefined) => projects.find((project) => project.id === projectId);
 
   return (
     <div
@@ -73,6 +76,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
               key={task.id}
               task={task}
               habit={habitById(task.habitId)}
+              project={projectById(task.projectId)}
               onEdit={onEditTask}
               onDelete={onDeleteTask}
             />

@@ -5,11 +5,12 @@ import { kanbanService } from '@/services/kanbanService';
 import { KanbanBoard } from '@/components/kanban/KanbanBoard';
 import { KanbanColumnFormDialog } from '@/components/kanban/KanbanColumnFormDialog';
 import { KanbanTaskFormDialog } from '@/components/kanban/KanbanTaskFormDialog';
+import { KanbanProjectManagerDialog } from '@/components/kanban/KanbanProjectManagerDialog';
 import { KanbanBoardSettingsDialog } from '@/components/kanban/KanbanBoardSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/common/DeleteConfirmDialog';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Button } from '@/components/ui/button';
-import { Settings2, Plus } from 'lucide-react';
+import { FolderKanban, Settings2, Plus } from 'lucide-react';
 
 export const KanbanPage: React.FC = () => {
   const {
@@ -17,6 +18,7 @@ export const KanbanPage: React.FC = () => {
     kanbanColumns,
     kanbanTasks,
     habits,
+    projects,
     deleteKanbanColumn,
     deleteKanbanTask,
   } = useHabits();
@@ -27,6 +29,7 @@ export const KanbanPage: React.FC = () => {
   const [editingTask, setEditingTask] = useState<KanbanTask | null>(null);
   const [defaultTaskColumnId, setDefaultTaskColumnId] = useState<string | undefined>(undefined);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [columnToDelete, setColumnToDelete] = useState<KanbanColumn | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<KanbanTask | null>(null);
 
@@ -94,6 +97,10 @@ export const KanbanPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => setProjectDialogOpen(true)}>
+            <FolderKanban className="w-4 h-4 mr-1.5" />
+            Projetos
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setBoardDialogOpen(true)}>
             <Settings2 className="w-4 h-4 mr-1.5" />
             Configurar
@@ -114,6 +121,7 @@ export const KanbanPage: React.FC = () => {
           columns={kanbanColumns}
           tasks={kanbanTasks}
           habits={habits}
+          projects={projects}
           onEditColumn={handleEditColumn}
           onDeleteColumn={handleDeleteColumn}
           onAddTask={handleAddTask}
@@ -144,6 +152,8 @@ export const KanbanPage: React.FC = () => {
       />
 
       <KanbanBoardSettingsDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} />
+
+      <KanbanProjectManagerDialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen} />
 
       <DeleteConfirmDialog
         open={columnToDelete !== null}

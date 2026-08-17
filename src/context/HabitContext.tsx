@@ -8,6 +8,7 @@ import type {
   KanbanBoard,
   KanbanColumn,
   KanbanTask,
+  Project,
   PomodoroSession,
   PomodoroSettings,
   PomodoroStats,
@@ -18,11 +19,13 @@ import { habitRepository } from '@/repositories/habitRepository';
 import { completionRepository } from '@/repositories/completionRepository';
 import { pomodoroRepository } from '@/repositories/pomodoroRepository';
 import { kanbanRepository } from '@/repositories/kanbanRepository';
+import { projectRepository } from '@/repositories/projectRepository';
 import { tombstoneRepository } from '@/repositories/tombstoneRepository';
 import { seedService } from '@/services/seedService';
 import { statisticsService } from '@/services/statisticsService';
 import { pomodoroService } from '@/services/pomodoroService';
 import { kanbanService } from '@/services/kanbanService';
+import { projectService } from '@/services/projectService';
 import { dateService } from '@/services/dateService';
 
 interface HabitContextType {
@@ -32,6 +35,12 @@ interface HabitContextType {
   dashboardStats: DashboardStats;
   categoryStats: CategoryStat[];
   tombstones: SyncTombstone[];
+
+  // Project Actions
+  projects: Project[];
+  addProject: (project: Pick<Project, 'name' | 'color'>) => Project | null;
+  updateProject: (project: Project) => boolean;
+  deleteProject: (id: string) => boolean;
 
   // Category Actions
   addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => void;
@@ -73,6 +82,7 @@ interface HabitContextType {
   deleteKanbanColumn: (id: string) => void;
   addKanbanTask: (task: Omit<KanbanTask, 'id' | 'createdAt' | 'updatedAt' | 'order'>) => void;
   updateKanbanTask: (task: KanbanTask) => void;
+  updateKanbanTaskProject: (taskId: string, projectId: string | null) => void;
   deleteKanbanTask: (id: string) => void;
   moveKanbanTask: (taskId: string, targetColumnId: string, targetIndex?: number) => void;
 
@@ -94,6 +104,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
   const [kanbanTasks, setKanbanTasks] = useState<KanbanTask[]>([]);
   const [tombstones, setTombstones] = useState<SyncTombstone[]>(() => tombstoneRepository.getAll());
+  const [projects, setProjects] = useState<Project[]>([]);
 
   // Initialize data on mount
   useEffect(() => {
@@ -112,6 +123,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setKanbanBoard(kanbanRepository.initBoardIfMissing());
     setKanbanColumns(kanbanRepository.getColumns());
     setKanbanTasks(kanbanRepository.getTasks());
+    setProjects(projectRepository.getAll());
     setTombstones(tombstoneRepository.getAll());
   }, []);
 
@@ -158,6 +170,40 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCategories(updated);
     setTombstones(tombstoneRepository.add('category', id));
     return { success: true };
+  };
+
+  // Project Operations
+  const addProject = (input: Pick<Project, 'name' | 'color'>): Project | null => {
+    if (!projectService.validate(input).valid) return null;
+    const project = projectService.create(input);
+    const updated = projectRepository.add(project);
+    setProjects(updated);
+    return project;
+  };
+
+  const updateProject = (project: Project): boolean => {
+    const current = projects.find((item) => item.id === project.id);
+    if (!current || !projectService.validate(project).valid) return false;
+    const updatedProject = projectService.update(current, project);
+    const updated = projectRepository.update(updatedProject);
+    setProjects(updated);
+    return true;
+  };
+
+  const deleteProject = (id: string): boolean => {
+    if (!projects.some((project) => project.id === id)) return false;
+    const deletedAt = Date.now();
+    const updatedProjects = projectRepository.delete(id);
+    const updatedTasks = kanbanTasks.map((task) =>
+      task.projectId === id
+        ? { ...task, projectId: null, updatedAt: new Date(deletedAt).toISOString() }
+        : task
+    );
+    kanbanRepository.saveTasks(updatedTasks);
+    setProjects(updatedProjects);
+    setKanbanTasks(updatedTasks);
+    setTombstones(tombstoneRepository.add('project', id, deletedAt));
+    return true;
   };
 
   // Habit Operations
@@ -349,6 +395,12 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setKanbanTasks(updated);
   };
 
+  const updateKanbanTaskProject = (taskId: string, projectId: string | null) => {
+    const task = kanbanTasks.find((item) => item.id === taskId);
+    if (!task || (projectId !== null && !projects.some((project) => project.id === projectId))) return;
+    updateKanbanTask({ ...task, projectId });
+  };
+
   const deleteKanbanTask = (id: string) => {
     const updated = kanbanRepository.deleteTask(id);
     setKanbanTasks(updated);
@@ -379,11 +431,14 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...pomodoroSessions.map((s) => ({ kind: 'pomodoroSession' as const, id: s.id, deletedAt: now })),
       ...kanbanColumns.map((c) => ({ kind: 'kanbanColumn' as const, id: c.id, deletedAt: now })),
       ...kanbanTasks.map((t) => ({ kind: 'kanbanTask' as const, id: t.id, deletedAt: now })),
+      ...projects.map((project) => ({ kind: 'project' as const, id: project.id, deletedAt: now })),
     ];
     const data = seedService.seedDemoData();
     setCategories(data.categories);
     setHabits(data.habits);
     setCompletions(data.completions);
+    projectRepository.saveAll([]);
+    setProjects([]);
     setTombstones(tombstoneRepository.addAll(tombstonesToRecord));
   };
 
@@ -394,6 +449,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         categories,
         habits,
         completions,
+        projects,
         pomodoroSettings,
         pomodoroSessions,
         kanbanBoard,
@@ -411,12 +467,33 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const parsed = JSON.parse(jsonStr);
       if (Array.isArray(parsed.categories) && Array.isArray(parsed.habits) && Array.isArray(parsed.completions)) {
+        const parsedProjects = Array.isArray(parsed.projects) ? parsed.projects : [];
+        if (!parsedProjects.every((project: unknown) => {
+          if (!project || typeof project !== 'object') return false;
+          const candidate = project as Partial<Project>;
+          return typeof candidate.id === 'string'
+            && typeof candidate.name === 'string'
+            && typeof candidate.color === 'string'
+            && typeof candidate.createdAt === 'string'
+            && typeof candidate.updatedAt === 'string'
+            && projectService.validate(candidate as Project).valid;
+        })) return false;
+        const importedTombstones = Array.isArray(parsed.tombstones) ? parsed.tombstones : [];
+        const importedProjects = parsedProjects.filter((project: Project) => {
+          const tombstone = importedTombstones.find(
+            (item: SyncTombstone) => item.kind === 'project' && item.id === project.id
+          );
+          return !tombstone || new Date(project.updatedAt).getTime() > tombstone.deletedAt;
+        });
+
         categoryRepository.saveAll(parsed.categories);
         habitRepository.saveAll(parsed.habits);
         completionRepository.saveAll(parsed.completions);
         setCategories(parsed.categories);
         setHabits(parsed.habits);
         setCompletions(parsed.completions);
+        projectRepository.saveAll(importedProjects);
+        setProjects(importedProjects);
 
         if (Array.isArray(parsed.pomodoroSessions)) {
           pomodoroRepository.saveAll(parsed.pomodoroSessions);
@@ -450,8 +527,12 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (Array.isArray(parsed.kanbanTasks)) {
-          kanbanRepository.saveAllTasks(parsed.kanbanTasks);
-          setKanbanTasks(parsed.kanbanTasks);
+          const projectIds = new Set(importedProjects.map((project: Project) => project.id));
+          const importedTasks = parsed.kanbanTasks.map((task: KanbanTask) =>
+            task.projectId && !projectIds.has(task.projectId) ? { ...task, projectId: null } : task
+          );
+          kanbanRepository.saveAllTasks(importedTasks);
+          setKanbanTasks(importedTasks);
         }
 
         if (Array.isArray(parsed.tombstones)) {
@@ -476,6 +557,10 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         dashboardStats,
         categoryStats,
         tombstones,
+        projects,
+        addProject,
+        updateProject,
+        deleteProject,
         addCategory,
         updateCategory,
         deleteCategory,
@@ -504,6 +589,7 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         deleteKanbanColumn,
         addKanbanTask,
         updateKanbanTask,
+        updateKanbanTaskProject,
         deleteKanbanTask,
         moveKanbanTask,
         resetToDemoData,

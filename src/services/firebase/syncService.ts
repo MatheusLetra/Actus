@@ -77,6 +77,7 @@ export const syncService = {
         kanbanBoard: data.kanbanBoard,
         kanbanColumns: data.kanbanColumns,
         kanbanTasks: data.kanbanTasks,
+        projects: data.projects,
         tombstones: data.tombstones,
       },
     }));

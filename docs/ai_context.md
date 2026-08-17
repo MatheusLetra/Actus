@@ -18,16 +18,16 @@ Aplicação web SPA **Controle de Hábitos Pessoais**, 100% offline no navegador
 
 ```
 src/
-├── types/        # Interfaces (Category, Habit, HabitCompletion, stats, pomodoro, kanban)
+├── types/        # Interfaces (Category, Project, Habit, HabitCompletion, stats, pomodoro, kanban)
 ├── constants/    # STORAGE_KEYS (actus:*), ícones, cores, dias da semana, labels pomodoro, colunas padrão kanban
-├── services/     # Puros: date, streak, statistics, seed, pomodoro, kanban, syncMerge
+├── services/     # Puros: date, streak, statistics, seed, pomodoro, kanban, project, syncMerge
 │                 # Browser helpers: notificationService, audioService, firebase/ (NÃO puros)
-├── repositories/ # storageService + habit/category/completion/pomodoro/kanban/tombstone
+├── repositories/ # storageService + habit/category/project/completion/pomodoro/kanban/tombstone
 ├── context/      # ThemeContext, HabitContext, FirebaseContext
 ├── components/   # ui/, common/, layout/, dashboard/, habits/, categories/, pomodoro/, kanban/, charts/
 ├── pages/        # Dashboard, Habits, Categories, Tools, Pomodoro, Kanban, History, Settings
 ├── routes/       # createBrowserRouter
-└── tests/        # dateService, streakService, pomodoroService, kanbanService, syncMergeService
+└── tests/        # dateService, streakService, pomodoroService, kanbanService, projectService, syncMergeService
 ```
 
 ## Arquitetura (resumo)
@@ -64,7 +64,8 @@ Sem comentários no código, a menos que solicitado.
 - `pomodoroRepository.add` mantém **uma única sessão ativa**.
 - Concluir foco com hábito vinculado também marca a conclusão do hábito (respeitando agendamento).
 - Kanban: `moveTask` reindexa colunas origem/destino; `deleteKanbanColumn` move tarefas para a primeira coluna restante; `deleteKanbanTask` limpa `linkedTaskId` do pomodoro.
-- Backup atual é `version: 3` (categories, habits, completions, pomodoro + kanban + tombstones); import retrocompatível v1/v2.
+- Project: entidade própria versionada (`createdAt`/`updatedAt`), persistida em `actus:projects`; `KanbanTask.projectId` é opcional e exclusão remove associações e cria tombstone. O Kanban possui gerenciador, seleção no Task Dialog e badge textual com indicador de cor; filtros continuam fora do MVP.
+- Backup atual é `version: 3` (categories, projects, habits, completions, pomodoro + kanban + tombstones); import retrocompatível v1/v2 e v3 sem projects.
 - Sync: `actus:tombstones` guarda marcas de exclusão; desmarcar/apagar propaga para os demais dispositivos (merge filtra itens cobertos por tombstone, com revira em re-marcações).
 
 ## Comandos
@@ -75,7 +76,7 @@ npm run build      # tsc -b && vite build
 npm run preview    # pré-visualiza build
 npm run lint       # tsc --noEmit (tipos) — NÃO é o oxlint
 npm run test       # vitest (watch)
-npm run test:run   # vitest uma vez (73 testes)
+npm run test:run   # vitest uma vez (102 testes)
 ```
 
 ## Validação de alterações

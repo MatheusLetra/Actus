@@ -53,14 +53,14 @@ main.tsx ──> App.tsx
 ```
 src/
 ├── main.tsx / App.tsx / index.css
-├── types/            Interfaces estritas (Category, Habit, HabitCompletion, stats, pomodoro, kanban)
+├── types/            Interfaces estritas (Category, Project, Habit, HabitCompletion, stats, pomodoro, kanban)
 ├── constants/        STORAGE_KEYS, AVAILABLE_ICONS, COLOR_OPTIONS, DAYS_OF_WEEK, labels/cores pomodoro, KANBAN_DEFAULT_COLUMNS
 ├── utils/            cn() (clsx + tailwind-merge)
-├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService
+├── services/         dateService, streakService, statisticsService, seedService, pomodoroService, kanbanService, projectService
 ├── services/         notificationService, audioService (helpers de browser — não puros)
 ├── services/         syncMergeService (merge puro de snapshots p/ sincronização)
 ├── services/firebase config.ts, authService.ts, syncService.ts (helpers de browser — não puros)
-├── repositories/     storageService, habitRepository, categoryRepository, completionRepository, pomodoroRepository, kanbanRepository, tombstoneRepository
+├── repositories/     storageService, habitRepository, categoryRepository, projectRepository, completionRepository, pomodoroRepository, kanbanRepository, tombstoneRepository
 ├── context/          ThemeContext, HabitContext, FirebaseContext
 ├── components/
 │   ├── ui/           Primitivas Shadcn (button, card, dialog, sheet, badge, progress, switch, input, label)
@@ -72,12 +72,12 @@ src/
 │   ├── categories/   CategoryCard, CategoryFormDialog
 │   ├── pomodoro/     PomodoroTimer, PomodoroSettingsForm, PomodoroSessionLog, usePomodoroTimer
 │   ├── kanban/       KanbanBoard, KanbanColumn, KanbanTaskCard, KanbanColumnFormDialog,
-│   │                 KanbanTaskFormDialog, KanbanBoardSettingsDialog, KanbanAdvanceDialog
+│   │                 KanbanTaskFormDialog, KanbanProjectManagerDialog, KanbanBoardSettingsDialog, KanbanAdvanceDialog
 │   └── charts/       Last7DaysChart, Last30DaysChart, CategoryDistributionChart, HabitPerformanceChart,
 │                     PomodoroDailyChart, PomodoroHabitChart, PomodoroCycleDistribution
 ├── pages/            Dashboard, Habits, Categories, Tools, Pomodoro, Kanban, History, Settings
 ├── routes/           Configuração do React Router
-└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts, syncMergeService.test.ts
+└── tests/            dateService.test.ts, streakService.test.ts, pomodoroService.test.ts, kanbanService.test.ts, projectService.test.ts, syncMergeService.test.ts
 ```
 
 ## Rotas
@@ -96,7 +96,7 @@ src/
 ## Gerenciamento de Estado
 
 - **ThemeContext**: tema `light` / `dark` / `system`; aplica classe no `<html>` e persiste em `actus:theme`.
-- **HabitContext**: estado central com `categories`, `habits`, `completions`, `pomodoroSettings`, `pomodoroSessions`, `kanbanBoard`, `kanbanColumns`, `kanbanTasks`, `tombstones` e todas as ações de domínio. Stats derivados via `useMemo`:
+- **HabitContext**: estado central com `categories`, `projects`, `habits`, `completions`, `pomodoroSettings`, `pomodoroSessions`, `kanbanBoard`, `kanbanColumns`, `kanbanTasks`, `tombstones` e todas as ações de domínio. Stats derivados via `useMemo`:
   - `dashboardStats` (depende de `habits`, `categories`, `completions`)
   - `categoryStats` (depende de `categories`, `habits`, `completions`)
   - `pomodoroStats` (depende de `pomodoroSessions`, `habits`)
@@ -111,6 +111,7 @@ Chaves centralizadas em `src/constants/index.ts`:
 |---|---|
 | `actus:habits` | Hábitos cadastrados |
 | `actus:categories` | Categorias |
+| `actus:projects` | Projetos do Kanban |
 | `actus:completions` | Conclusões por data (`YYYY-MM-DD`) |
 | `actus:theme` | Tema (`light` \| `dark` \| `system`) |
 | `actus:initialized` | Flag de seed inicial |
@@ -131,6 +132,7 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 - **seedService**: `seedDemoData` — popula categorias/hábitos/histórico (~30 dias) na primeira execução.
 - **pomodoroService**: defaults/validação de settings, duração por tipo de ciclo, sequência de fases (pausa longa a cada N focos), `getPomodoroStats`.
 - **kanbanService**: `getDefaultBoard`, `getDefaultColumns`, validação de board/column/task, ordenação/reindexação por `order`, `moveTask` (troca de coluna + reindexação de origem/destino), `getKanbanStats`, `getColumnsSortedForSelect`.
+- **projectService**: validação de nome/cor, criação versionada, ID com `crypto.randomUUID()` e fallback local, atualização e ordenação determinística.
 - **completionRepository**: `toggle` (marca/desmarca) e `complete` (idempotente) — usados pela UI e pelo pomodoro. Marcas de exclusão são gravadas pelo **tombstoneRepository** (deleções, desmarcações e reset de dados).
 
 ## Pomodoro (detalhes de implementação)
@@ -154,15 +156,16 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 - Ordenação por campo `order`: `kanbanService.moveTask` remove a tarefa, insere na coluna alvo (índice opcional, padrão fim) e **reindexa** origem/destino para evitar drift de números; quando origem == destino (reordenação na mesma coluna), trata como caso único (não duplica).
 - Colunas/tarefas têm modais de cadastro/edição (`KanbanColumnFormDialog`, `KanbanTaskFormDialog`) com validação em PT-BR e `ColorPicker` para cor.
 - Tarefa pode vincular um hábito opcionalmente (`KanbanTask.habitId`); badge com ícone/cor do hábito no card.
+- Tarefa pode vincular opcionalmente um único projeto (`KanbanTask.projectId`). Projects são versionados por `updatedAt`; excluir um projeto remove as associações das tarefas e cria tombstone. O Kanban possui gerenciador de Projects, seleção opcional no Task Dialog e badge textual com indicador de cor no TaskCard; filtros continuam fora do MVP.
 - `deleteKanbanColumn` move as tarefas órfãs para a primeira coluna restante (ou exclui se não houver colunas); `deleteKanbanTask` limpa `linkedTaskId` das configurações do pomodoro.
 - Backup/restore: `exportData` gera `version: 3` com kanban; `importData` restaura quando presente e válido (retrocompatível v1/v2).
 
 ## Sincronização com Google / Firebase
 
 - **Autenticação**: Firebase Auth com `GoogleAuthProvider` (`src/services/firebase/authService.ts`); estado via `onAuthStateChanged`; sessão persistida no navegador. Credenciais em `.env` (`VITE_FIREBASE_*`), lidas em `src/services/firebase/config.ts` (sem `initializeApp` se ausentes, e o card é ocultado).
-- **Persistência remota**: Cloud Firestore com núcleo por usuário (`users/{uid}`: categories, habits, settings, kanban) e **subcoleções mensais** para as listas que crescem (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) — evita o limite de 1 MB/documento. `syncService.readSnapshot` recombina os meses; `writeSnapshot` reparticiona e remove meses órfãos.
+- **Persistência remota**: Cloud Firestore com núcleo por usuário (`users/{uid}`: categories, projects, habits, settings, kanban) e **subcoleções mensais** para as listas que crescem (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) — evita o limite de 1 MB/documento. `syncService.readSnapshot` recombina os meses; `writeSnapshot` reparticiona e remove meses órfãos.
 - **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). `pushCoordinator` separa payload acknowledged, writing e pending, coalesceia o estado mais recente durante uma escrita e só confirma o payload após sucesso. Snapshots remotos semanticamente iguais, inclusive callbacks intermediários do próprio write, não geram import ou write-back.
-- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item. `Habit.updatedAt` resolve LWW integral por hábito; hábitos legados sem o campo usam o timestamp global somente entre cópias legadas. Completions usam `updatedAt`/tombstones; kanban é reordenado/reindexado após o merge. O payload Firebase remove propriedades `undefined` sem alterar o estado original.
+- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item. `Habit.updatedAt` resolve LWW integral por hábito; Projects usam `updatedAt`, ordem determinística por `createdAt`/`id` e tombstone próprio. Referências inválidas de `KanbanTask.projectId` são normalizadas para `null`; a coleção viaja no core existente, sem shard, path ou listener adicional.
 - **Regras Firestore** no console: `match /users/{userId}` + subcoleções com `allow read, write: if request.auth.uid == userId`.
 - **UI**: `CloudSyncCard` em Configurações (login, "Sincronizar agora", "Sair"); rodapé da página indica status de sync.
 
@@ -189,7 +192,7 @@ O custo estrutural do snapshot permanece: cada publicação grava o core, todos 
 ## Testes
 
 - Vitest, arquivos em `src/tests/*.test.ts` (ambiente node, sem jsdom).
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts`, `syncMergeService.test.ts`, `habitRepository.test.ts` — **73 testes**.
+- Cobertura atual: testes de datas, streaks, pomodoro, kanban, projetos, repositories e sincronização — **102 testes**.
 - Execução: `npm run test:run` (uma vez) ou `npm run test` (watch).
 
 ## Executar e Validar

@@ -86,6 +86,17 @@ describe('kanbanService', () => {
     expect(updated.find((t) => t.id === 't2')?.order).toBe(0);
   });
 
+  it('should preserve a task project while moving it', () => {
+    const tasks = [
+      task({ id: 't1', columnId: 'col_0', order: 0, projectId: 'project_1' }),
+      task({ id: 't2', columnId: 'col_1', order: 0 }),
+    ];
+
+    const updated = kanbanService.moveTask(tasks, 't1', 'col_1');
+
+    expect(updated.find((item) => item.id === 't1')?.projectId).toBe('project_1');
+  });
+
   it('should move a task to a specific index within the target column', () => {
     const tasks = [
       task({ id: 't1', columnId: 'col_0', order: 0 }),

@@ -7,15 +7,18 @@ import type {
   KanbanTask,
   PomodoroSession,
   PomodoroSettings,
+  Project,
   SyncTombstone,
   TombstoneKind,
 } from '@/types';
 import { kanbanService } from './kanbanService';
 import { pomodoroService } from './pomodoroService';
+import { projectService } from './projectService';
 
 export interface ActusData {
   version: number;
   categories: Category[];
+  projects: Project[];
   habits: Habit[];
   completions: HabitCompletion[];
   pomodoroSettings: PomodoroSettings;
@@ -97,6 +100,25 @@ function mergeHabits(
     if (shouldUseRemote) map.set(remoteHabit.id, remoteHabit);
   }
   return Array.from(map.values());
+}
+
+function mergeProjects(localProjects: Project[], remoteProjects: Project[]): Project[] {
+  const map = new Map<string, Project>();
+  for (const project of localProjects) map.set(project.id, project);
+  for (const remoteProject of remoteProjects) {
+    const localProject = map.get(remoteProject.id);
+    if (!localProject) {
+      map.set(remoteProject.id, remoteProject);
+      continue;
+    }
+
+    const localStamp = toMilliseconds(localProject.updatedAt);
+    const remoteStamp = toMilliseconds(remoteProject.updatedAt);
+    if (remoteStamp > localStamp || (remoteStamp === localStamp && JSON.stringify(remoteProject) > JSON.stringify(localProject))) {
+      map.set(remoteProject.id, remoteProject);
+    }
+  }
+  return projectService.sort(Array.from(map.values()));
 }
 
 function mergeCompletions(local: HabitCompletion[], remote: HabitCompletion[]): HabitCompletion[] {
@@ -220,11 +242,38 @@ function pickByTimestamp<T>(
   return remoteStamp > localStamp ? remote : local;
 }
 
+function normalizeTaskProjectReferences(tasks: KanbanTask[], projects: Project[]): KanbanTask[] {
+  const projectIds = new Set(projects.map((project) => project.id));
+  return tasks.map((task) =>
+    task.projectId && !projectIds.has(task.projectId)
+      ? { ...task, projectId: null }
+      : task
+  );
+}
+
+function normalizeProjectSnapshot(snapshot: ActusSnapshot): ActusSnapshot {
+  const tombstones = [...snapshot.tombstones];
+  const projects = filterTombstoned(
+    snapshot.projects ?? [],
+    tombstones,
+    'project',
+    (project) => project.id,
+    (project) => toPerItemStamp(project)
+  );
+  return {
+    ...snapshot,
+    projects: projectService.sort(projects),
+    kanbanTasks: normalizeTaskProjectReferences(snapshot.kanbanTasks, projects),
+    tombstones,
+  };
+}
+
 export const syncMergeService = {
   buildData(data: Partial<ActusData>): ActusData {
     return {
       version: data.version ?? SYNC_VERSION,
       categories: data.categories ?? [],
+      projects: data.projects ?? [],
       habits: data.habits ?? [],
       completions: data.completions ?? [],
       pomodoroSettings: data.pomodoroSettings ?? pomodoroService.getDefaultSettings(),
@@ -250,8 +299,8 @@ export const syncMergeService = {
   },
 
   mergeSnapshots(local: ActusSnapshot | null, remote: ActusSnapshot | null): ActusSnapshot | null {
-    if (!local) return remote ? { ...remote } : null;
-    if (!remote) return { ...local };
+    if (!local) return remote ? normalizeProjectSnapshot({ ...remote, projects: remote.projects ?? [] }) : null;
+    if (!remote) return normalizeProjectSnapshot({ ...local, projects: local.projects ?? [] });
 
     const localUpdatedAt = local.updatedAt || 0;
     const remoteUpdatedAt = remote.updatedAt || 0;
@@ -275,6 +324,12 @@ export const syncMergeService = {
     );
     const remoteCategories = filterTombstoned(remote.categories, activeTombstones, 'category', byId, (c) =>
       toPerItemStamp(c)
+    );
+    const localProjects = filterTombstoned(local.projects ?? [], activeTombstones, 'project', byId, (project) =>
+      toPerItemStamp(project)
+    );
+    const remoteProjects = filterTombstoned(remote.projects ?? [], activeTombstones, 'project', byId, (project) =>
+      toPerItemStamp(project)
     );
     const habits = filterTombstoned(local.habits, activeTombstones, 'habit', byId, (h) => toPerItemStamp(h));
     const remoteHabits = filterTombstoned(remote.habits, activeTombstones, 'habit', byId, (h) => toPerItemStamp(h));
@@ -333,18 +388,20 @@ export const syncMergeService = {
     const mergedTasks = kanbanService.reindexTasks(
       kanbanService.sortTasks(mergeById(localTasks, remoteTasks, localUpdatedAt, remoteUpdatedAt))
     );
+    const projects = mergeProjects(localProjects, remoteProjects);
 
     return {
       version: SYNC_VERSION,
       updatedAt,
       categories: mergeById(categories, remoteCategories, localUpdatedAt, remoteUpdatedAt),
+      projects,
       habits: mergeHabits(habits, remoteHabits, localUpdatedAt, remoteUpdatedAt),
       completions: mergeCompletions(localCompletions, remoteCompletions),
       pomodoroSettings: mergeSettings,
       pomodoroSessions: mergeSessions(localSessions, remoteSessions, localUpdatedAt, remoteUpdatedAt),
       kanbanBoard: mergeBoard,
       kanbanColumns: mergedColumns,
-      kanbanTasks: mergedTasks,
+      kanbanTasks: normalizeTaskProjectReferences(mergedTasks, projects),
       tombstones: activeTombstones,
     };
   },

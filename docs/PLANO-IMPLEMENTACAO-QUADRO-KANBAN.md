@@ -18,6 +18,7 @@ Adicionar ao menu **Ferramentas Úteis** (ao lado do Pomodoro) a ferramenta **Qu
 - **Backup**: `exportData` sobe para `version: 3` incluindo `kanbanBoard`, `kanbanColumns`, `kanbanTasks`; `importData` restaura apenas quando presentes (retrocompatível com v1/v2).
 - **Exclusão de coluna**: tarefas da coluna excluída são movidas para a primeira coluna restante; se não houver colunas restantes, as tarefas são excluídas (confirmação via `DeleteConfirmDialog`).
 - **Exclusão de tarefa**: limpa `linkedTaskId` nas configurações do pomodoro caso aponte para ela.
+- **Projects no Kanban**: gerenciador no header, vínculo opcional `projectId` no formulário de tarefa e badge textual com indicador de cor no card; filtros, tags e múltiplos projetos permanecem fora do MVP.
 
 ## Entidades (em `src/types/index.ts`)
 
@@ -103,6 +104,7 @@ taskId?: string | null;
 - [x] `src/components/kanban/KanbanBoard.tsx` — layout do quadro (colunas em scroll horizontal, Mobile-First) com `DndContext`/`SortableContext` e handlers de drag end
 - [x] `src/components/kanban/KanbanColumnFormDialog.tsx` — modal criar/editar coluna (nome + `ColorPicker`)
 - [x] `src/components/kanban/KanbanTaskFormDialog.tsx` — modal criar/editar tarefa (título, descrição, etapa/coluna, hábito vinculado opcional via select de `habits`)
+- [x] `src/components/kanban/KanbanProjectManagerDialog.tsx` — gerenciador mobile-first de criação, edição, cor e exclusão de Projects
 - [x] `src/components/kanban/KanbanBoardSettingsDialog.tsx` — modal editar nome/cor do quadro
 - [x] `src/components/kanban/KanbanAdvanceDialog.tsx` — diálogo pós-foco: "Deseja avançar a tarefa '[título]' para uma nova etapa?" → se sim, listar colunas destino (exceto a atual) → confirmar
 
@@ -192,4 +194,3 @@ taskId?: string | null;
 - **Causa raiz 2** (`DragOverlay`): o `KanbanTaskCard` (com `useSortable`) era reutilizado no overlay, registrando um droppable duplicado com o mesmo `id` da tarefa. Extraído `KanbanTaskCardContent` (puro) e adicionada prop `overlay` ao card para o `DragOverlay`.
 - **Teste adicionado**: `kanbanService.test.ts` → "should reorder a task within the same column without duplicating" (garante a não-duplicação em reordenação na mesma coluna).
 - **Validação**: lint OK · `test:run` **25/25** · build OK.
-
