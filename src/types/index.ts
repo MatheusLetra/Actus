@@ -20,6 +20,7 @@ export interface Habit {
   startDate: string; // YYYY-MM-DD
   active: boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface HabitCompletion {

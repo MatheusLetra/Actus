@@ -12,6 +12,7 @@ export const seedService = {
     const today = dateService.getTodayString();
     const startDate = dateService.subtractDays(today, 30);
     const createdAt = new Date().toISOString();
+    const updatedAt = createdAt;
 
     const categories: Category[] = [
       {
@@ -56,6 +57,7 @@ export const seedService = {
         startDate,
         active: true,
         createdAt,
+        updatedAt,
       },
       {
         id: 'habit_leitura',
@@ -68,6 +70,7 @@ export const seedService = {
         startDate,
         active: true,
         createdAt,
+        updatedAt,
       },
       {
         id: 'habit_treino',
@@ -81,6 +84,7 @@ export const seedService = {
         startDate,
         active: true,
         createdAt,
+        updatedAt,
       },
       {
         id: 'habit_meditacao',
@@ -93,6 +97,7 @@ export const seedService = {
         startDate,
         active: true,
         createdAt,
+        updatedAt,
       },
       {
         id: 'habit_code',
@@ -105,6 +110,7 @@ export const seedService = {
         startDate,
         active: true,
         createdAt,
+        updatedAt,
       },
     ];
 

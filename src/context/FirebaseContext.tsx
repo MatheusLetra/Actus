@@ -78,7 +78,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     tombstones,
   };
 
-  const lastWrittenUpdatedAtRef = useRef(0);
   const lastPushedSerializedRef = useRef<string | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncInProgressRef = useRef(false);
@@ -113,7 +112,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     pushInProgressRef.current = true;
     try {
       await syncService.writeSnapshot(uid, data, updatedAt);
-      lastWrittenUpdatedAtRef.current = updatedAt;
       lastPushedSerializedRef.current = syncMergeService.dataToJson(data);
       const now = Date.now();
       setLastSyncAt(now);
@@ -140,11 +138,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const merged = syncMergeService.mergeSnapshots(localSnapshot, remote);
 
       if (merged) {
-        if (!syncMergeService.dataEquals(merged, localData)) {
-          applyToLocal(merged);
-          dataRef.current = merged;
+        const mergedData = syncMergeService.snapshotToData(merged);
+        if (!syncMergeService.dataEquals(mergedData, localData)) {
+          applyToLocal(mergedData);
+          dataRef.current = mergedData;
         }
-        await writeToCloud(uid, merged, merged.updatedAt);
+        await writeToCloud(uid, mergedData, merged.updatedAt);
       }
       startWatch(uid);
       setStatus('signedIn');
@@ -169,19 +168,21 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    if (remote.updatedAt <= lastWrittenUpdatedAtRef.current) return;
+    const { updatedAt: remoteUpdatedAt, ...remoteData } = remote;
+    if (lastPushedSerializedRef.current === syncMergeService.dataToJson(remoteData)) return;
 
     const localData = dataRef.current;
-    const localSnapshot = syncMergeService.toSnapshot(localData, remote.updatedAt - 1);
+    const localSnapshot = syncMergeService.toSnapshot(localData, remoteUpdatedAt - 1);
     const merged = syncMergeService.mergeSnapshots(localSnapshot, remote);
 
-    lastWrittenUpdatedAtRef.current = remote.updatedAt;
-
-    if (merged && !syncMergeService.dataEquals(merged, localData)) {
-      applyToLocal(merged);
-      dataRef.current = merged;
-      lastPushedSerializedRef.current = syncMergeService.dataToJson(merged);
-      void writeToCloud(uid, merged, remote.updatedAt);
+    if (merged) {
+      const mergedData = syncMergeService.snapshotToData(merged);
+      if (!syncMergeService.dataEquals(mergedData, localData)) {
+        applyToLocal(mergedData);
+        dataRef.current = mergedData;
+        lastPushedSerializedRef.current = syncMergeService.dataToJson(mergedData);
+        void writeToCloud(uid, mergedData, Math.max(remoteUpdatedAt, Date.now()));
+      }
     }
   };
 
@@ -205,7 +206,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setError(null);
         stopWatch();
         cancelPendingPush();
-        lastWrittenUpdatedAtRef.current = 0;
         lastPushedSerializedRef.current = null;
         storageService.removeItem(STORAGE_KEYS.syncUser);
       }
@@ -277,11 +277,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const localSnapshot = syncMergeService.toSnapshot(localData, Date.now());
       const merged = syncMergeService.mergeSnapshots(localSnapshot, remote);
       if (merged) {
-        if (!syncMergeService.dataEquals(merged, localData)) {
-          applyToLocal(merged);
-          dataRef.current = merged;
+        const mergedData = syncMergeService.snapshotToData(merged);
+        if (!syncMergeService.dataEquals(mergedData, localData)) {
+          applyToLocal(mergedData);
+          dataRef.current = mergedData;
         }
-        await writeToCloud(user.uid, merged, merged.updatedAt);
+        await writeToCloud(user.uid, mergedData, merged.updatedAt);
       }
       setStatus('signedIn');
     } catch (err) {

@@ -43,6 +43,10 @@ function getItemStamp(item: { updatedAt?: string; completedAt?: string; endAt?: 
   return own > 0 ? own : fallback;
 }
 
+function getHabitStamp(habit: Habit): number {
+  return toMilliseconds(habit.updatedAt);
+}
+
 function mergeById<T extends { id: string }>(
   localItems: T[],
   remoteItems: T[],
@@ -61,6 +65,36 @@ function mergeById<T extends { id: string }>(
     const localStamp = stamp(existing) || localUpdatedAt;
     const remoteStamp = stamp(item) || remoteUpdatedAt;
     if (remoteStamp > localStamp) map.set(item.id, item);
+  }
+  return Array.from(map.values());
+}
+
+function mergeHabits(
+  localHabits: Habit[],
+  remoteHabits: Habit[],
+  localUpdatedAt: number,
+  remoteUpdatedAt: number
+): Habit[] {
+  const map = new Map<string, Habit>();
+  for (const habit of localHabits) map.set(habit.id, habit);
+  for (const remoteHabit of remoteHabits) {
+    const localHabit = map.get(remoteHabit.id);
+    if (!localHabit) {
+      map.set(remoteHabit.id, remoteHabit);
+      continue;
+    }
+
+    const localStamp = getHabitStamp(localHabit);
+    const remoteStamp = getHabitStamp(remoteHabit);
+    const shouldUseRemote = localStamp > 0 && remoteStamp > 0
+      ? remoteStamp > localStamp
+      : localStamp === 0 && remoteStamp > 0
+        ? true
+        : localStamp > 0 && remoteStamp === 0
+          ? false
+          : remoteUpdatedAt > localUpdatedAt;
+
+    if (shouldUseRemote) map.set(remoteHabit.id, remoteHabit);
   }
   return Array.from(map.values());
 }
@@ -206,6 +240,11 @@ export const syncMergeService = {
     return JSON.stringify(data);
   },
 
+  snapshotToData(snapshot: ActusSnapshot): ActusData {
+    const { updatedAt: _updatedAt, ...data } = snapshot;
+    return data;
+  },
+
   dataEquals(a: ActusData, b: ActusData): boolean {
     return JSON.stringify(a) === JSON.stringify(b);
   },
@@ -299,7 +338,7 @@ export const syncMergeService = {
       version: SYNC_VERSION,
       updatedAt,
       categories: mergeById(categories, remoteCategories, localUpdatedAt, remoteUpdatedAt),
-      habits: mergeById(habits, remoteHabits, localUpdatedAt, remoteUpdatedAt),
+      habits: mergeHabits(habits, remoteHabits, localUpdatedAt, remoteUpdatedAt),
       completions: mergeCompletions(localCompletions, remoteCompletions),
       pomodoroSettings: mergeSettings,
       pomodoroSessions: mergeSessions(localSessions, remoteSessions, localUpdatedAt, remoteUpdatedAt),

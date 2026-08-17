@@ -120,7 +120,7 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 ## Testes
 
 - Framework: **Vitest**; arquivos em `src/tests/*.test.ts`.
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts` e `syncMergeService.test.ts` (42 testes — datas, streaks, pomodoro, kanban e merge de sincronização).
+- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts`, `syncMergeService.test.ts` e `habitRepository.test.ts` (73 testes — datas, streaks, pomodoro, kanban, versionamento de hábitos, comparação de snapshots e merge de sincronização).
 - Testes existentes importam serviços diretamente (sem setup especial, sem jsdom).
 - Para adicionar testes de novos serviços, criar `src/tests/<nome>.test.ts` seguindo o mesmo estilo (`describe`/`it`/`expect`).
 - **Validar sempre**: `npm run test:run` antes de finalizar alterações.
@@ -136,7 +136,7 @@ Observação: o script `lint` executa `tsc --noEmit` (validação de tipos), **n
 - Notificações usam `Notification` API; se o navegador bloquear a permissão, o form reverte o toggle e exibe aviso.
 - `audioService.playChime` tenta `public/pomodoro-chime.wav` e cai para chime via Web Audio se falhar.
 - Firebase: credenciais via `.env` (`VITE_FIREBASE_*`); sem credenciais, `initializeApp` não roda (`services/firebase/config.ts`) e o card de sincronização fica oculto. Erros de sync usam `getErrorMessage` (PT-BR); popup fechado/cancelado é silencioso.
-- Sync (chaves `actus:syncUser`, `actus:lastSyncAt`, `actus:tombstones`): Firestore com núcleo `users/{uid}` + subcoleções mensais; `syncMergeService.mergeSnapshots` união + last-writer-wins + tombstones de exclusão (desmarcar/apagar remove nos demais dispositivos; re-marcar revira o item); guarda anti-eco via `updatedAt`.
+- Sync (chaves `actus:syncUser`, `actus:lastSyncAt`, `actus:tombstones`): Firestore com núcleo `users/{uid}` + subcoleções mensais; `syncMergeService.mergeSnapshots` união + last-writer-wins + tombstones de exclusão (desmarcar/apagar remove nos demais dispositivos; re-marcar revira o item). `Habit.updatedAt` resolve LWW por hábito; hábitos legados sem o campo usam fallback global apenas entre cópias legadas. A guarda anti-eco identifica o conteúdo do último write, compara dados de domínio sem o `updatedAt` global e o payload Firestore remove `undefined` recursivamente.
 - Formulários validam campos obrigatórios e exibem mensagens de erro em PT-BR.
 - `IconRenderer` possui fallback de ícone (padrão `Target`); gráficos e `EmptyState` tratam listas vazias.
 

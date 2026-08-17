@@ -36,7 +36,7 @@ A aplicação é **offline-first, 100% no navegador, sem backend próprio** e a 
 
 1. **Merge automático ao logar** (recomendado): ao entrar com Google, faz-se `merge(local + nuvem)` e o resultado é gravado nos dois lados. Simples, previsível e resolve os dois requisitos sem perguntas.
    - Alternativa (se preferir dar controle ao usuário): exibir na primeira sincronização de cada dispositivo um diálogo — "Mesclar dados (recomendado)" / "Sobrescrever locais pela nuvem" / "Enviar locais para a nuvem".
-2. **Resolução de conflito** — "quem editou por último vence por item": itens com `id` igual presentes nos dois lados são resolvidos pela versão da origem com `updatedAt` mais recente (por item quando houver `updatedAt`/`completedAt` — kanban task, kanban board, pomodoro session —; senão pelo `updatedAt` global do snapshot). Itens exclusivos de um lado são preservados (união).
+2. **Resolução de conflito** — "quem editou por último vence por item": itens com `id` igual presentes nos dois lados são resolvidos pela versão da origem com timestamp próprio mais recente. `Habit.updatedAt` resolve a versão integral do hábito; hábitos legados sem o campo usam `updatedAt` global apenas quando ambas as cópias são legadas. Itens exclusivos de um lado são preservados (união).
 3. **Sincronização em tempo real** (recomendado): `onSnapshot` do documento aplica mudanças remotas automaticamente, com guarda anti-eco. Se preferir algo minimalista: sincronizar **apenas no login + botão "Sincronizar agora"** + push com debounce.
 4. **Intervalo de push**: debounce de ~800 ms após qualquer alteração de dados no `HabitContext`.
 5. **Escopo sincronizado**: categorias, hábitos, completions, pomodoro settings/sessions, kanban board/columns/tasks **e tombstones** de exclusão (espelho exato do backup `version: 3`). O **tema** (`actus:theme`) permanece local por dispositivo.
@@ -102,12 +102,12 @@ Assim, a lógica de merge continua operando sobre **arrays completos em memória
 Serviço puro (object literal, sem React/Firebase) com entrada `(local, remote)` e saída `{ merged }`:
 
 1. `updatedAt = max(local.updatedAt, remote.updatedAt)`.
-2. **Coleções com `id`** (categories, habits, kanbanColumns, kanbanTasks): união por `id`; item em ambos os lados → versão da origem mais recente (por `updatedAt` do item quando existir; senão pelo `updatedAt` do snapshot).
+2. **Coleções com `id`** (categories, habits, kanbanColumns, kanbanTasks): união por `id`; item em ambos os lados → versão da origem mais recente. Hábitos usam `Habit.updatedAt`; para hábitos legados, o fallback global só é usado quando ambos não têm timestamp próprio.
 3. **Completions**: união por chave `habitId + date`; `completed: true` vence registros falsos. Desmarcar/remover registra um **tombstone** (`completion`, chave `habitId|date`) para propagar a remoção aos demais dispositivos; re-marcar cria um novo registro com `updatedAt` mais novo, que **revive** o item e elimina o tombstone.
 4. **Tombstones** (deleções): toda exclusão (categoria, hábito, `completion`, `pomodoroSession`, `kanbanColumn`, `kanbanTask`) grava `{ kind, id, deletedAt }`. No merge, tombstone de mesmo `kind+id` vence o mais recente e **remove itens cobertos** das coleções; um item só sobrevive se tiver timestamp próprio mais novo que o `deletedAt` (revira/recriação).
 5. **PomodoroSessions**: união por `id`; versão com `completedAt`/`startedAt` mais recente.
 6. **Configurações**: `pomodoroSettings` (sem timestamp próprio) e `kanbanBoard` (tem `updatedAt`) → prevalece o lado com `updatedAt` global mais recente.
-7. Após o merge, `importData(JSON.stringify(merged))` valida a estrutura completa e aplica em localStorage + estado (sem reindexações adicionais — os dados de cada lado já vêm válidos).
+7. Após o merge, os dados do snapshot são comparados sem o metadata global `updatedAt`; `importData(JSON.stringify(merged))` só é chamado quando o domínio realmente mudou. Quando aplicado, valida a estrutura completa e grava em localStorage + estado.
 8. O particionamento mensal é **transparente**: o merge opera sobre os arrays completos (`completions`, `pomodoroSessions`) recombinados pelo `syncService` (leitura) e reparticionados na escrita.
 
 ## Fluxos

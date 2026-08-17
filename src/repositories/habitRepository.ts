@@ -13,14 +13,16 @@ export const habitRepository = {
 
   add(habit: Habit): Habit[] {
     const list = this.getAll();
-    const updated = [habit, ...list];
+    const updated = [{ ...habit, updatedAt: habit.updatedAt ?? new Date().toISOString() }, ...list];
     this.saveAll(updated);
     return updated;
   },
 
   update(updatedHabit: Habit): Habit[] {
     const list = this.getAll();
-    const updated = list.map((h) => (h.id === updatedHabit.id ? updatedHabit : h));
+    const updated = list.map((h) =>
+      h.id === updatedHabit.id ? { ...updatedHabit, updatedAt: new Date().toISOString() } : h
+    );
     this.saveAll(updated);
     return updated;
   },
@@ -34,7 +36,9 @@ export const habitRepository = {
 
   toggleActive(id: string): Habit[] {
     const list = this.getAll();
-    const updated = list.map((h) => (h.id === id ? { ...h, active: !h.active } : h));
+    const updated = list.map((h) =>
+      h.id === id ? { ...h, active: !h.active, updatedAt: new Date().toISOString() } : h
+    );
     this.saveAll(updated);
     return updated;
   },

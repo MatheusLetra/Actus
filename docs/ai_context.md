@@ -75,7 +75,7 @@ npm run build      # tsc -b && vite build
 npm run preview    # pré-visualiza build
 npm run lint       # tsc --noEmit (tipos) — NÃO é o oxlint
 npm run test       # vitest (watch)
-npm run test:run   # vitest uma vez (42 testes)
+npm run test:run   # vitest uma vez (73 testes)
 ```
 
 ## Validação de alterações

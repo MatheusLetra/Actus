@@ -159,10 +159,14 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 
 - **Autenticação**: Firebase Auth com `GoogleAuthProvider` (`src/services/firebase/authService.ts`); estado via `onAuthStateChanged`; sessão persistida no navegador. Credenciais em `.env` (`VITE_FIREBASE_*`), lidas em `src/services/firebase/config.ts` (sem `initializeApp` se ausentes, e o card é ocultado).
 - **Persistência remota**: Cloud Firestore com núcleo por usuário (`users/{uid}`: categories, habits, settings, kanban) e **subcoleções mensais** para as listas que crescem (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) — evita o limite de 1 MB/documento. `syncService.readSnapshot` recombina os meses; `writeSnapshot` reparticiona e remove meses órfãos.
-- **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). Guarda anti-eco via `lastWrittenUpdatedAtRef`.
-- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item (timestamp próprio `updatedAt`/`completedAt` se houver, senão `updatedAt` do snapshot); completions unem por `habitId+date` preferindo `completed:true`; **tombstones** unem por `kind+id` (vence o mais recente) e removem itens cobertos por exclusão (item revira se tiver timestamp próprio mais novo que o `deletedAt`); kanban reordenado/reindexado no merge.
+- **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). A guarda anti-eco identifica o conteúdo do último write, e a aplicação compara dados de domínio sem considerar o `updatedAt` global do snapshot.
+- **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item. `Habit.updatedAt` resolve LWW integral por hábito; hábitos legados sem o campo usam o timestamp global somente entre cópias legadas. Completions usam `updatedAt`/tombstones; kanban é reordenado/reindexado após o merge. O payload Firebase remove propriedades `undefined` sem alterar o estado original.
 - **Regras Firestore** no console: `match /users/{userId}` + subcoleções com `allow read, write: if request.auth.uid == userId`.
 - **UI**: `CloudSyncCard` em Configurações (login, "Sincronizar agora", "Sair"); rodapé da página indica status de sync.
+
+### Dívida técnica de sincronização
+
+`Category`, `KanbanColumn` e `PomodoroSettings` ainda dependem do timestamp global para conflitos porque não possuem versionamento próprio equivalente a `Habit.updatedAt`. Eles permanecem fora do escopo da correção de hábitos.
 
 ## Padrões de Código
 
@@ -177,7 +181,7 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 ## Testes
 
 - Vitest, arquivos em `src/tests/*.test.ts` (ambiente node, sem jsdom).
-- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts`, `syncMergeService.test.ts` — **42 testes**.
+- Cobertura atual: `dateService.test.ts`, `streakService.test.ts`, `pomodoroService.test.ts`, `kanbanService.test.ts`, `syncMergeService.test.ts`, `habitRepository.test.ts` — **73 testes**.
 - Execução: `npm run test:run` (uma vez) ou `npm run test` (watch).
 
 ## Executar e Validar

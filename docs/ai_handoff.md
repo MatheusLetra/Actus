@@ -9,9 +9,11 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - Pomodoro (etapas 1–10 + evoluções da segunda rodada): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-POMODORO.md`.
 - Quadro Kanban (etapas 1–9): `[x]` — ver `docs/PLANO-IMPLEMENTACAO-QUADRO-KANBAN.md`.
 - Sincronização Google/Firebase: `[x]` — ver `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md`.
-- Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **42/42 testes** (5 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
+- Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **69/69 testes** (6 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
 - **Correção de bug (rodada 5 — sincronização)**: exclusões/desmarcações agora **propagam para todos os dispositivos** via *tombstones* (antes, desmarcar em um dispositivo podia voltar a aparecer como concluído ao sincronizar com outro). Detalhes abaixo.
 - **Correção de bug (rodada 6 — Pomodoro em background)**: sessões running agora usam deadline absoluto (`endAt`), reconciliam pelo relógio real, restauram pausadas após reload e concluem de forma idempotente. Notificação/áudio continuam best effort quando a página permanece executável.
+- **Correção de bug (rodada 7 — edições de Habit)**: hábitos novos e alterados agora possuem `updatedAt` próprio; o merge usa LWW integral por hábito, com fallback global apenas entre cópias legadas. A guarda anti-eco compara conteúdo do último write e o payload Firebase remove `undefined` recursivamente.
+- **Correção de bug (rodada 8 — formulário e comparação de snapshots)**: `HabitFormDialog` só reinicializa ao abrir ou trocar o `Habit.id`; `categories` não apaga mais edições locais. `FirebaseContext` normaliza `ActusSnapshot` para `ActusData` antes de decidir `importData()`, ignorando apenas metadata global. A suíte passou com **73 testes**.
 
 ## O que foi implementado (resumo — rodada mais recente: Sincronização Google)
 
@@ -56,12 +58,13 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 ## Decisões de implementação (lembrar)
 
 - **Scharding**: `completions` e `pomodoroSessions` são particionadas por mês (`YYYY-MM`) nas subcoleções Firestore; `readSnapshot` recombinar e `writeSnapshot` reparticiona (+ remove meses órfãos). Merge opera sobre arrays completos em memória.
-- **Merge**: items só de um lado são sempre preservados (união); item em ambos vence pela versão com timestamp mais recente (por item quando houver `updatedAt`/`completedAt`, senão pelo `updatedAt` global do snapshot). Completions unem por `habitId+date` preferindo `completed:true`. Kanban é reordenado/reindexado após o merge.
+- **Merge**: items só de um lado são sempre preservados (união); `Habit` em ambos vence pela versão integral com `updatedAt` próprio mais recente. Cópias legadas de `Habit` usam o timestamp global somente entre si. Completions unem por `habitId+date` preferindo `completed:true`. Kanban é reordenado/reindexado após o merge.
 - **Tombstones**: exclusões (habits, categories, completions, pomodoroSessions, kanbanColumns/tasks) geram `{ kind, id, deletedAt }` em `actus:tombstones`; o merge une por `kind+id` (vence o mais recente) e remove itens cobertos. `HabitCompletion.updatedAt` registra marcações recentes; re-marcar "revive" o item (timestamp > `deletedAt`) e apaga o tombstone.
-- **Antieco**: `lastWrittenUpdatedAtRef` compara `updatedAt`; push gravado com `updatedAt = Date.now()`; ao aplicar snapshot remoto mais novo, o write-back preserva o `updatedAt` remoto para convergir sem loop.
+- **Antieco**: o listener ignora apenas snapshot com conteúdo igual ao último write; snapshots diferentes passam pelo merge por entidade. A comparação de aplicação ignora `updatedAt` global, mas preserva timestamps próprios como `Habit.updatedAt`. O write-back recebe timestamp novo e preserva as versões próprias dos itens.
 - **Pomodoro em background**: sessões running persistem `endAt`; pause congela `remainingSeconds` e remove o deadline; resume cria outro deadline; reload reconcilia sessões modernas e as restaura pausadas. A UI reconcilia também em `visibilitychange`, e a conclusão é idempotente por sessão. Notification API e áudio são best effort e não executam se o navegador suspender completamente a página.
 - **Firestore rules** (aplicar no console): `match /users/{userId}` + subcoleções, `allow read, write: if request.auth.uid == userId`.
 - **Chunk size**: o bundle subiu para ~2,1 MB (Firebase ~+600 kB gzip). Aviso pré-existente. Código-splitting (import dinâmico do Firebase) é evolução pendente opcional.
+- **Dívida técnica**: `Category`, `KanbanColumn` e `PomodoroSettings` ainda não possuem versionamento próprio equivalente a `Habit.updatedAt` e permanecem dependentes do timestamp global.
 
 ## Correções de bugs (rodada 4 — Kanban mobile)
 
@@ -91,7 +94,7 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 ## Validação atual (rodada mais recente)
 
 - `npm run lint` — sem erros de tipo.
-- `npm run test:run` — 5 arquivos, **42 testes** passando.
+- `npm run test:run` — 6 arquivos, **73 testes** passando.
 - `npm run build` — gerado com sucesso (chunk > 500 kB: aviso de tamanho, não é erro).
 
 ## O que foi implementado (resumo — rodada mais recente: Quadro Kanban)

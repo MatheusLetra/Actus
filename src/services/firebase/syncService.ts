@@ -11,6 +11,7 @@ import {
 import type { HabitCompletion, PomodoroSession } from '@/types';
 import { db } from './config';
 import { syncMergeService, SYNC_VERSION, type ActusData, type ActusSnapshot } from '../syncMergeService';
+import { sanitizeForFirestore } from './snapshotSerialization';
 
 type StoredCoreData = Omit<ActusData, 'completions' | 'pomodoroSessions'>;
 
@@ -66,7 +67,7 @@ export const syncService = {
     const instance = requireDb();
     const coreRef = doc(instance, 'users', uid);
 
-    await setDoc(coreRef, {
+    await setDoc(coreRef, sanitizeForFirestore({
       updatedAt,
       data: {
         version: SYNC_VERSION,
@@ -78,7 +79,7 @@ export const syncService = {
         kanbanTasks: data.kanbanTasks,
         tombstones: data.tombstones,
       },
-    });
+    }));
 
     const completionsByMonth = groupByMonth(data.completions);
     const pomodoroByMonth = groupByMonth(data.pomodoroSessions);
@@ -94,10 +95,10 @@ export const syncService = {
     const stalePomodoro = existingPomodoro.docs.map((d) => d.id).filter((id) => !pomodoroByMonth.has(id));
 
     const completionWrites = Array.from(completionsByMonth.entries()).map(([month, items]) =>
-      setDoc(doc(instance, 'users', uid, 'completions', month), { items })
+      setDoc(doc(instance, 'users', uid, 'completions', month), sanitizeForFirestore({ items }))
     );
     const pomodoroWrites = Array.from(pomodoroByMonth.entries()).map(([month, items]) =>
-      setDoc(doc(instance, 'users', uid, 'pomodoro', month), { items })
+      setDoc(doc(instance, 'users', uid, 'pomodoro', month), sanitizeForFirestore({ items }))
     );
     const staleDeletes = [
       ...staleCompletions.map((id) => deleteDoc(doc(instance, 'users', uid, 'completions', id))),

@@ -157,17 +157,19 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Habit Operations
   const addHabit = (h: Omit<Habit, 'id' | 'createdAt'>) => {
+    const now = new Date().toISOString();
     const newHabit: Habit = {
       ...h,
       id: `habit_${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
     const updated = habitRepository.add(newHabit);
     setHabits(updated);
   };
 
   const updateHabit = (h: Habit) => {
-    const updated = habitRepository.update(h);
+    const updated = habitRepository.update({ ...h, updatedAt: new Date().toISOString() });
     setHabits(updated);
   };
 

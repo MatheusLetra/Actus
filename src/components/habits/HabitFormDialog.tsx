@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Habit, HabitFrequency } from '@/types';
 import { DAYS_OF_WEEK } from '@/constants';
 import { useHabits } from '@/context/HabitContext';
@@ -43,21 +43,31 @@ export const HabitFormDialog: React.FC<HabitFormDialogProps> = ({
 
   const [errors, setErrors] = useState<{ name?: string; categoryId?: string; startDate?: string }>({});
 
+  const habitToEditRef = useRef(habitToEdit);
+  const categoriesRef = useRef(categories);
+  habitToEditRef.current = habitToEdit;
+  categoriesRef.current = categories;
+
+  const habitId = habitToEdit?.id ?? null;
+
   useEffect(() => {
-    if (habitToEdit) {
-      setName(habitToEdit.name);
-      setDescription(habitToEdit.description || '');
-      setCategoryId(habitToEdit.categoryId);
-      setIcon(habitToEdit.icon || 'Target');
-      setColor(habitToEdit.color || '#8b5cf6');
-      setFrequency(habitToEdit.frequency);
-      setTargetDays(habitToEdit.targetDays || [1, 2, 3, 4, 5]);
-      setStartDate(habitToEdit.startDate);
-      setActive(habitToEdit.active);
+    if (!open) return;
+
+    const currentHabit = habitToEditRef.current;
+    if (currentHabit) {
+      setName(currentHabit.name);
+      setDescription(currentHabit.description || '');
+      setCategoryId(currentHabit.categoryId);
+      setIcon(currentHabit.icon || 'Target');
+      setColor(currentHabit.color || '#8b5cf6');
+      setFrequency(currentHabit.frequency);
+      setTargetDays(currentHabit.targetDays || [1, 2, 3, 4, 5]);
+      setStartDate(currentHabit.startDate);
+      setActive(currentHabit.active);
     } else {
       setName('');
       setDescription('');
-      setCategoryId(categories.length > 0 ? categories[0].id : '');
+      setCategoryId(categoriesRef.current.length > 0 ? categoriesRef.current[0].id : '');
       setIcon('Target');
       setColor('#8b5cf6');
       setFrequency('daily');
@@ -66,7 +76,7 @@ export const HabitFormDialog: React.FC<HabitFormDialogProps> = ({
       setActive(true);
     }
     setErrors({});
-  }, [habitToEdit, open, categories]);
+  }, [open, habitId]);
 
   const toggleTargetDay = (dayId: number) => {
     if (targetDays.includes(dayId)) {

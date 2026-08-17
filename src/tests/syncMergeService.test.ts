@@ -11,9 +11,11 @@ import type {
 } from '../types';
 import { syncMergeService, type ActusSnapshot } from '../services/syncMergeService';
 import { pomodoroService } from '../services/pomodoroService';
+import { sanitizeForFirestore } from '../services/firebase/snapshotSerialization';
 
 const nowIso = '2026-08-10T10:00:00.000Z';
 const oldIso = '2026-01-01T10:00:00.000Z';
+const newerIso = '2026-08-17T10:05:00.000Z';
 
 function habit(overrides: Partial<Habit> = {}): Habit {
   return {
@@ -131,6 +133,102 @@ describe('syncMergeService', () => {
     expect(merged!.habits[0].name).toBe('Remoto');
   });
 
+  it('should resolve habits by their own updatedAt instead of snapshot timestamps', () => {
+    const local = snapshot({
+      updatedAt: 900,
+      habits: [habit({ updatedAt: newerIso, targetDays: [1, 2, 3, 4, 5] })],
+    });
+    const remote = snapshot({
+      updatedAt: 1000,
+      habits: [habit({ updatedAt: nowIso, targetDays: undefined })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0].targetDays).toEqual([1, 2, 3, 4, 5]);
+    expect(merged!.habits[0].updatedAt).toBe(newerIso);
+  });
+
+  it('should resolve the remote habit when its own version is newer', () => {
+    const local = snapshot({
+      updatedAt: 2000,
+      habits: [habit({ updatedAt: nowIso, name: 'Local' })],
+    });
+    const remote = snapshot({
+      updatedAt: 1000,
+      habits: [habit({ updatedAt: newerIso, name: 'Remoto' })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0].name).toBe('Remoto');
+  });
+
+  it('should prefer a versioned habit over a legacy copy', () => {
+    const local = snapshot({
+      updatedAt: 1,
+      habits: [habit({ updatedAt: newerIso, name: 'Versionado' })],
+    });
+    const remote = snapshot({
+      updatedAt: 999999,
+      habits: [habit({ updatedAt: undefined, name: 'Legado' })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0].name).toBe('Versionado');
+  });
+
+  it('should use the snapshot fallback for two legacy habits', () => {
+    const local = snapshot({
+      updatedAt: 100,
+      habits: [habit({ updatedAt: undefined, name: 'Local' })],
+    });
+    const remote = snapshot({
+      updatedAt: 200,
+      habits: [habit({ updatedAt: undefined, name: 'Remoto' })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0].name).toBe('Remoto');
+  });
+
+  it('should let a newer habit win over an unrelated newer snapshot change', () => {
+    const local = snapshot({
+      updatedAt: 2000,
+      habits: [habit({ updatedAt: newerIso, name: 'Atualizado' })],
+      kanbanTasks: [task({ updatedAt: newerIso })],
+    });
+    const remote = snapshot({
+      updatedAt: 3000,
+      habits: [habit({ updatedAt: nowIso, name: 'Antigo' })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0].name).toBe('Atualizado');
+  });
+
+  it.each([
+    ['name', { name: 'Atualizado' }],
+    ['description', { description: 'Descrição nova' }],
+    ['categoryId', { categoryId: 'cat_2' }],
+    ['icon', { icon: 'BookOpen' }],
+    ['color', { color: '#ef4444' }],
+    ['frequency', { frequency: 'weekly' as const }],
+    ['targetDays', { frequency: 'custom' as const, targetDays: [1, 2, 3, 4, 5] }],
+    ['startDate', { startDate: '2026-09-01' }],
+    ['active', { active: false }],
+  ])('uses the newer whole habit for %s', (_field, changes) => {
+    const local = snapshot({ habits: [habit({ updatedAt: newerIso, ...changes })] });
+    const remote = snapshot({ habits: [habit({ updatedAt: nowIso })] });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0]).toEqual(local.habits[0]);
+  });
+
   it('should merge completions by habitId+date, preferring completed', () => {
     const local = snapshot({ completions: [completion('habit_1', '2026-08-01')] });
     const remote = snapshot({
@@ -225,6 +323,44 @@ describe('syncMergeService', () => {
     expect(syncMergeService.dataEquals(a, b)).toBe(true);
   });
 
+  it('should ignore snapshot updatedAt when comparing domain data', () => {
+    const older = snapshot({ updatedAt: 100 });
+    const newer = snapshot({ updatedAt: 200 });
+
+    expect(syncMergeService.dataEquals(syncMergeService.snapshotToData(older), syncMergeService.snapshotToData(newer))).toBe(true);
+  });
+
+  it('should preserve entity timestamps as domain differences', () => {
+    const older = syncMergeService.snapshotToData(snapshot({ habits: [habit({ updatedAt: nowIso })] }));
+    const newer = syncMergeService.snapshotToData(snapshot({ habits: [habit({ updatedAt: newerIso })] }));
+
+    expect(syncMergeService.dataEquals(older, newer)).toBe(false);
+  });
+
+  it('should detect category, kanban and tombstone domain changes', () => {
+    const base = syncMergeService.snapshotToData(snapshot());
+    const changedCategory = syncMergeService.snapshotToData(
+      snapshot({ categories: [{ id: 'cat_1', name: 'Saúde', icon: 'Heart', color: '#ef4444', createdAt: nowIso }] })
+    );
+    const changedKanban = syncMergeService.snapshotToData(snapshot({ kanbanTasks: [task()] }));
+    const changedTombstone = syncMergeService.snapshotToData(
+      snapshot({ tombstones: [tombstone('habit', 'habit_1', 100)] })
+    );
+
+    expect(syncMergeService.dataEquals(base, changedCategory)).toBe(false);
+    expect(syncMergeService.dataEquals(base, changedKanban)).toBe(false);
+    expect(syncMergeService.dataEquals(base, changedTombstone)).toBe(false);
+  });
+
+  it('should normalize snapshots without mutating them', () => {
+    const snapshotWithMetadata = snapshot({ updatedAt: 1234, habits: [habit()] });
+    const normalized = syncMergeService.snapshotToData(snapshotWithMetadata);
+
+    expect(normalized).not.toHaveProperty('updatedAt');
+    expect(snapshotWithMetadata).toHaveProperty('updatedAt', 1234);
+    expect(snapshotWithMetadata.habits).toBe(normalized.habits);
+  });
+
   it('should propagate a completion unmark as a tombstone (removing the remote record)', () => {
     const local = snapshot({
       updatedAt: 200,
@@ -267,6 +403,21 @@ describe('syncMergeService', () => {
     expect(merged!.habits).toHaveLength(0);
   });
 
+  it('should keep a habit version newer than its tombstone', () => {
+    const local = snapshot({
+      habits: [habit({ updatedAt: newerIso })],
+      tombstones: [tombstone('habit', 'habit_1', dateMs('2026-08-17T10:00:00.000Z'))],
+    });
+    const remote = snapshot({
+      habits: [habit({ updatedAt: nowIso })],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.habits[0].updatedAt).toBe(newerIso);
+    expect(merged!.tombstones).toHaveLength(0);
+  });
+
   it('should keep the newest tombstone when both sides have the same key', () => {
     const local = snapshot({
       tombstones: [tombstone('habit', 'habit_1', 100)],
@@ -281,6 +432,21 @@ describe('syncMergeService', () => {
   it('should default tombstones to an empty array in buildData', () => {
     const data = syncMergeService.buildData({ categories: [] });
     expect(data.tombstones).toEqual([]);
+  });
+
+  it('should remove undefined values recursively without mutating the input', () => {
+    const source = {
+      habits: [{ frequency: 'daily', targetDays: undefined, active: true }],
+      nested: { value: undefined, keep: null },
+    };
+
+    const sanitized = sanitizeForFirestore(source);
+
+    expect(sanitized).toEqual({
+      habits: [{ frequency: 'daily', active: true }],
+      nested: { keep: null },
+    });
+    expect(source.habits[0]).toHaveProperty('targetDays');
   });
 });
 
