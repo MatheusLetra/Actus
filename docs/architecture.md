@@ -135,13 +135,14 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 
 ## Pomodoro (detalhes de implementação)
 
-- Timer gerenciado pelo hook `usePomodoroTimer` (`src/components/pomodoro/usePomodoroTimer.ts`), com `setInterval`; ciclo foco → pausa curta/pausa longa (a cada `longBreakInterval` focos) → foco.
+- Timer gerenciado pelo hook `usePomodoroTimer` (`src/components/pomodoro/usePomodoroTimer.ts`), com deadline absoluto (`endAt`) e `setInterval` apenas para atualizar a UI; ciclo foco → pausa curta/pausa longa (a cada `longBreakInterval` focos) → foco.
 - **Uma única sessão ativa** por vez: `pomodoroRepository.add` remove sessões `running`/`paused` anteriores.
-- Sessão pausada persiste `remainingSeconds`; ao recarregar, é restaurada como **pausada** (retomada manual).
+- Sessão `running` persiste `endAt`; pausa reconcilia pelo relógio real, congela `remainingSeconds` e remove o deadline; resume cria um novo deadline. Ao recarregar, uma sessão moderna ainda em andamento é reconciliada e restaurada como **pausada** (retomada manual), enquanto sessões pausadas mantêm o restante congelado.
+- A reconciliação ocorre nos ticks e imediatamente ao retornar a uma aba visível. A conclusão é idempotente por sessão, protegendo registro, hábito, Kanban, notificação e áudio contra callbacks duplicados.
 - Foco concluído = registro automático (`status: 'completed'`); se houver hábito vinculado, marca a conclusão do hábito na data (respeitando `active` e `isHabitScheduledOnDate`).
 - `PomodoroSessionLog` exibe badges com o nome do hábito (variante `secondary`) e/ou da tarefa do quadro (variante `outline`) vinculados ao ciclo; no mobile o item empilha (texto + badges em linhas separadas) para evitar sobreposição.
 - Vínculo de tarefa do Kanban (`linkedTaskId`): ao iniciar um foco, `taskId` é gravado na sessão; ao concluir, o `KanbanAdvanceDialog` pergunta se deseja avançar a tarefa e lista as colunas destino (exceto a atual). O vínculo de hábito não é alterado.
-- Notificação via Notification API e som via `public/pomodoro-chime.wav` (fallback Web Audio), ambos configuráveis.
+- Notificação via Notification API e som via `public/pomodoro-chime.wav` (fallback Web Audio), ambos configuráveis e best effort: não há garantia quando o navegador suspende completamente a página ou bloqueia autoplay.
 
 ## Kanban (detalhes de implementação)
 

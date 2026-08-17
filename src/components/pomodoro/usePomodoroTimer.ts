@@ -34,85 +34,104 @@ export const usePomodoroTimer = () => {
 
   const restoredRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
+  const completedSessionIdsRef = useRef(new Set<string>());
+  const cancelledSessionIdsRef = useRef(new Set<string>());
 
   const activeSession: PomodoroSession | null = pomodoroService.getActiveSession(pomodoroSessions);
 
-  const stopTick = () => {
+  const stopTick = useCallback(() => {
     if (intervalRef.current !== null) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    if (!isRunning) return;
-    intervalRef.current = window.setInterval(() => {
-      setRemainingSeconds((prev) => (prev > 1 ? prev - 1 : 0));
-    }, 1000);
-    return stopTick;
-  }, [isRunning]);
+  const completeCycle = useCallback(
+    (sessionToComplete: PomodoroSession | null = activeSession) => {
+      if (!sessionToComplete || completedSessionIdsRef.current.has(sessionToComplete.id)) return;
+      if (
+        cancelledSessionIdsRef.current.has(sessionToComplete.id) ||
+        (sessionToComplete.status !== 'running' && sessionToComplete.status !== 'paused')
+      ) return;
 
-  const completeCycle = useCallback(() => {
-    if (activeSession) {
-      updatePomodoroSession(activeSession.id, {
+      completedSessionIdsRef.current.add(sessionToComplete.id);
+      stopTick();
+      setIsRunning(false);
+
+      updatePomodoroSession(sessionToComplete.id, {
         status: 'completed',
         remainingSeconds: 0,
+        endAt: undefined,
         completedAt: new Date().toISOString(),
       });
-    }
 
-    if (activeSession?.cycleType === 'focus' && activeSession.habitId) {
-      const linked = habits.find((h) => h.id === activeSession.habitId);
-      if (linked && linked.active && streakService.isHabitScheduledOnDate(linked, activeSession.date)) {
-        completeHabitCompletion(linked.id, activeSession.date);
+      if (sessionToComplete.cycleType === 'focus' && sessionToComplete.habitId) {
+        const linked = habits.find((h) => h.id === sessionToComplete.habitId);
+        if (linked && linked.active && streakService.isHabitScheduledOnDate(linked, sessionToComplete.date)) {
+          completeHabitCompletion(linked.id, sessionToComplete.date);
+        }
       }
-    }
 
-    if (activeSession?.cycleType === 'focus' && activeSession.taskId) {
-      const linkedTask = kanbanTasks.find((t) => t.id === activeSession.taskId);
-      if (linkedTask) {
-        setPendingAdvanceTask({
-          taskId: linkedTask.id,
-          taskTitle: linkedTask.title,
-          currentColumnId: linkedTask.columnId,
-        });
+      if (sessionToComplete.cycleType === 'focus' && sessionToComplete.taskId) {
+        const linkedTask = kanbanTasks.find((t) => t.id === sessionToComplete.taskId);
+        if (linkedTask) {
+          setPendingAdvanceTask({
+            taskId: linkedTask.id,
+            taskTitle: linkedTask.title,
+            currentColumnId: linkedTask.columnId,
+          });
+        }
       }
-    }
 
-    if (settings.notificationsEnabled) {
-      const title = cycleType === 'focus' ? 'Foco concluído!' : 'Pausa concluída!';
-      const body = cycleType === 'focus' ? 'Hora de uma pausa.' : 'Hora de focar.';
-      notificationService.notify(title, body);
-    }
-    if (settings.soundEnabled) {
-      audioService.playChime();
-    }
+      if (settings.notificationsEnabled) {
+        const title = sessionToComplete.cycleType === 'focus' ? 'Foco concluído!' : 'Pausa concluída!';
+        const body = sessionToComplete.cycleType === 'focus' ? 'Hora de uma pausa.' : 'Hora de focar.';
+        notificationService.notify(title, body);
+      }
+      if (settings.soundEnabled) {
+        audioService.playChime();
+      }
 
-    const todayStr = dateService.getTodayString();
-    const completedFocusToday = pomodoroSessions.filter(
-      (s) => s.status === 'completed' && s.cycleType === 'focus' && s.date === todayStr
-    ).length;
-    const focusCount = cycleType === 'focus' ? completedFocusToday + 1 : completedFocusToday;
+      const todayStr = dateService.getTodayString();
+      const completedFocusToday = pomodoroSessions.filter(
+        (s) => s.status === 'completed' && s.cycleType === 'focus' && s.date === todayStr
+      ).length;
+      const focusCount = sessionToComplete.cycleType === 'focus' ? completedFocusToday + 1 : completedFocusToday;
+      const nextType = pomodoroService.getNextCycleType(sessionToComplete.cycleType, focusCount, settings);
+      const nextDuration = pomodoroService.getCycleDurationSeconds(nextType, settings);
+      const autoRun = nextType === 'focus' ? settings.autoStartFocus : settings.autoStartBreaks;
 
-    const nextType = pomodoroService.getNextCycleType(cycleType, focusCount, settings);
-    const nextDuration = pomodoroService.getCycleDurationSeconds(nextType, settings);
-    const autoRun = nextType === 'focus' ? settings.autoStartFocus : settings.autoStartBreaks;
+      setCycleType(nextType);
+      setRemainingSeconds(nextDuration);
+      setHasStarted(false);
+      setIsRunning(false);
+      restoredRef.current = true;
 
-    setCycleType(nextType);
-    setRemainingSeconds(nextDuration);
-    setHasStarted(false);
-    setIsRunning(false);
-    restoredRef.current = true;
+      if (autoRun) {
+        beginCycle(nextType);
+      }
+    },
+    [activeSession, completeHabitCompletion, habits, kanbanTasks, pomodoroSessions, settings, stopTick, updatePomodoroSession]
+  );
 
-    if (autoRun) {
-      beginCycle(nextType);
-    }
-  }, [activeSession, cycleType, settings, pomodoroSessions, habits, kanbanTasks, completeHabitCompletion]);
+  const reconcile = useCallback(
+    (now = Date.now(), sessionToReconcile: PomodoroSession | null = activeSession) => {
+      if (!sessionToReconcile || sessionToReconcile.status !== 'running') return false;
+      const result = pomodoroService.reconcileRunningSession(sessionToReconcile, now);
+      setRemainingSeconds(result.remainingSeconds);
+      if (result.expired) {
+        completeCycle(sessionToReconcile);
+      }
+      return result.expired;
+    },
+    [activeSession, completeCycle]
+  );
 
   const beginCycle = useCallback(
     (type: PomodoroCycleType, autoRun = true) => {
       restoredRef.current = true;
       const duration = pomodoroService.getCycleDurationSeconds(type, settings);
+      const now = Date.now();
       createPomodoroSession({
         habitId: type === 'focus' ? (settings.linkedHabitId ?? null) : null,
         taskId: type === 'focus' ? (settings.linkedTaskId ?? null) : null,
@@ -120,7 +139,8 @@ export const usePomodoroTimer = () => {
         plannedSeconds: duration,
         remainingSeconds: duration,
         status: autoRun ? 'running' : 'paused',
-        startedAt: new Date().toISOString(),
+        startedAt: new Date(now).toISOString(),
+        endAt: autoRun ? pomodoroService.createDeadline(now, duration) : undefined,
         date: dateService.getTodayString(),
       });
       setCycleType(type);
@@ -128,57 +148,79 @@ export const usePomodoroTimer = () => {
       setHasStarted(true);
       setIsRunning(autoRun);
     },
-    [settings, createPomodoroSession]
+    [createPomodoroSession, settings]
   );
 
-  // Restore a persisted running/paused session after the provider loads data.
+  useEffect(() => {
+    if (!isRunning) return;
+    const tick = () => reconcile();
+    tick();
+    intervalRef.current = window.setInterval(tick, 1000);
+    return stopTick;
+  }, [isRunning, reconcile, stopTick]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') reconcile();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [reconcile]);
+
   useEffect(() => {
     if (restoredRef.current) return;
     const active = pomodoroService.getActiveSession(pomodoroSessions);
-    if (active) {
-      restoredRef.current = true;
-      setCycleType(active.cycleType);
-      setRemainingSeconds(active.remainingSeconds);
-      setHasStarted(true);
-      setIsRunning(false);
-    }
-  }, [pomodoroSessions]);
+    if (!active) return;
 
-  // When settings load/change and no cycle has started, reflect the configured duration.
+    restoredRef.current = true;
+    setCycleType(active.cycleType);
+    setHasStarted(true);
+
+    if (active.status === 'running' && active.endAt) {
+      const result = pomodoroService.reconcileRunningSession(active, Date.now());
+      if (result.expired) {
+        completeCycle(active);
+        return;
+      }
+      updatePomodoroSession(active.id, { status: 'paused', remainingSeconds: result.remainingSeconds, endAt: undefined });
+      setRemainingSeconds(result.remainingSeconds);
+    } else {
+      setRemainingSeconds(Math.max(0, active.remainingSeconds));
+    }
+    setIsRunning(false);
+  }, [completeCycle, pomodoroSessions, updatePomodoroSession]);
+
   useEffect(() => {
     if (!hasStarted) {
       setRemainingSeconds(pomodoroService.getCycleDurationSeconds(cycleType, settings));
     }
   }, [settings, hasStarted, cycleType]);
 
-  // Complete when the countdown reaches zero.
-  useEffect(() => {
-    if (isRunning && hasStarted && remainingSeconds === 0) {
-      setIsRunning(false);
-      stopTick();
-      completeCycle();
-    }
-  }, [remainingSeconds, isRunning, hasStarted, completeCycle]);
-
   const start = useCallback(() => {
     beginCycle(cycleType, true);
   }, [beginCycle, cycleType]);
 
   const pause = useCallback(() => {
+    if (!activeSession || activeSession.status !== 'running') return;
+    const now = Date.now();
+    if (reconcile(now, activeSession)) return;
+    const paused = pomodoroService.pauseSession(activeSession, now);
     setIsRunning(false);
-    if (activeSession) {
-      updatePomodoroSession(activeSession.id, { status: 'paused', remainingSeconds });
-    }
-  }, [activeSession, remainingSeconds]);
+    setRemainingSeconds(paused.remainingSeconds);
+    updatePomodoroSession(activeSession.id, { status: 'paused', ...paused });
+  }, [activeSession, reconcile, updatePomodoroSession]);
 
   const resume = useCallback(() => {
-    if (!activeSession || remainingSeconds <= 0) return;
-    updatePomodoroSession(activeSession.id, { status: 'running' });
+    if (!activeSession || activeSession.status !== 'paused' || remainingSeconds <= 0) return;
+    const resumed = pomodoroService.resumeSession({ ...activeSession, remainingSeconds }, Date.now());
+    cancelledSessionIdsRef.current.delete(activeSession.id);
+    updatePomodoroSession(activeSession.id, { status: 'running', ...resumed });
     setIsRunning(true);
-  }, [activeSession, remainingSeconds]);
+  }, [activeSession, remainingSeconds, updatePomodoroSession]);
 
   const skip = useCallback(() => {
     if (activeSession) {
+      cancelledSessionIdsRef.current.add(activeSession.id);
       removePomodoroSession(activeSession.id);
     }
     const todayStr = dateService.getTodayString();
@@ -186,16 +228,18 @@ export const usePomodoroTimer = () => {
       (s) => s.status === 'completed' && s.cycleType === 'focus' && s.date === todayStr
     ).length;
     const nextType = pomodoroService.getNextCycleType(cycleType, completedFocusToday, settings);
+    stopTick();
     setCycleType(nextType);
     setRemainingSeconds(pomodoroService.getCycleDurationSeconds(nextType, settings));
     setHasStarted(false);
     setIsRunning(false);
     restoredRef.current = true;
-  }, [activeSession, cycleType, settings, pomodoroSessions]);
+  }, [activeSession, cycleType, pomodoroSessions, removePomodoroSession, settings, stopTick]);
 
   const reset = useCallback(() => {
     stopTick();
     if (activeSession) {
+      cancelledSessionIdsRef.current.add(activeSession.id);
       removePomodoroSession(activeSession.id);
     }
     const duration = pomodoroService.getCycleDurationSeconds('focus', settings);
@@ -204,21 +248,17 @@ export const usePomodoroTimer = () => {
     setHasStarted(false);
     setIsRunning(false);
     restoredRef.current = true;
-  }, [activeSession, settings]);
+  }, [activeSession, removePomodoroSession, settings, stopTick]);
 
   const confirmAdvanceTask = useCallback(
     (targetColumnId: string) => {
-      if (pendingAdvanceTask) {
-        moveKanbanTask(pendingAdvanceTask.taskId, targetColumnId);
-      }
+      if (pendingAdvanceTask) moveKanbanTask(pendingAdvanceTask.taskId, targetColumnId);
       setPendingAdvanceTask(null);
     },
-    [pendingAdvanceTask, moveKanbanTask]
+    [moveKanbanTask, pendingAdvanceTask]
   );
 
-  const dismissAdvanceTask = useCallback(() => {
-    setPendingAdvanceTask(null);
-  }, []);
+  const dismissAdvanceTask = useCallback(() => setPendingAdvanceTask(null), []);
 
   const plannedSeconds = activeSession?.plannedSeconds ?? pomodoroService.getCycleDurationSeconds(cycleType, settings);
   const progress = plannedSeconds > 0 ? Math.round(((plannedSeconds - remainingSeconds) / plannedSeconds) * 100) : 0;

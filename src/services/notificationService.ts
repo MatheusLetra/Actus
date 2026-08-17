@@ -15,6 +15,10 @@ export const notificationService = {
 
   notify(title: string, body?: string): void {
     if (!this.isSupported() || Notification.permission !== 'granted') return;
-    new Notification(title, { body });
+    try {
+      new Notification(title, { body });
+    } catch {
+      return;
+    }
   },
 };

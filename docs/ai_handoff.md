@@ -11,6 +11,7 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - Sincronização Google/Firebase: `[x]` — ver `docs/PLANEJAMENTO-SINCRONIZACAO-GOOGLE.md`.
 - Estado de validação atual: `lint` (tsc --noEmit) sem erros · `test:run` **42/42 testes** (5 arquivos) · `build` OK (apenas aviso pré-existente de tamanho de chunk).
 - **Correção de bug (rodada 5 — sincronização)**: exclusões/desmarcações agora **propagam para todos os dispositivos** via *tombstones* (antes, desmarcar em um dispositivo podia voltar a aparecer como concluído ao sincronizar com outro). Detalhes abaixo.
+- **Correção de bug (rodada 6 — Pomodoro em background)**: sessões running agora usam deadline absoluto (`endAt`), reconciliam pelo relógio real, restauram pausadas após reload e concluem de forma idempotente. Notificação/áudio continuam best effort quando a página permanece executável.
 
 ## O que foi implementado (resumo — rodada mais recente: Sincronização Google)
 
@@ -58,6 +59,7 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - **Merge**: items só de um lado são sempre preservados (união); item em ambos vence pela versão com timestamp mais recente (por item quando houver `updatedAt`/`completedAt`, senão pelo `updatedAt` global do snapshot). Completions unem por `habitId+date` preferindo `completed:true`. Kanban é reordenado/reindexado após o merge.
 - **Tombstones**: exclusões (habits, categories, completions, pomodoroSessions, kanbanColumns/tasks) geram `{ kind, id, deletedAt }` em `actus:tombstones`; o merge une por `kind+id` (vence o mais recente) e remove itens cobertos. `HabitCompletion.updatedAt` registra marcações recentes; re-marcar "revive" o item (timestamp > `deletedAt`) e apaga o tombstone.
 - **Antieco**: `lastWrittenUpdatedAtRef` compara `updatedAt`; push gravado com `updatedAt = Date.now()`; ao aplicar snapshot remoto mais novo, o write-back preserva o `updatedAt` remoto para convergir sem loop.
+- **Pomodoro em background**: sessões running persistem `endAt`; pause congela `remainingSeconds` e remove o deadline; resume cria outro deadline; reload reconcilia sessões modernas e as restaura pausadas. A UI reconcilia também em `visibilitychange`, e a conclusão é idempotente por sessão. Notification API e áudio são best effort e não executam se o navegador suspender completamente a página.
 - **Firestore rules** (aplicar no console): `match /users/{userId}` + subcoleções, `allow read, write: if request.auth.uid == userId`.
 - **Chunk size**: o bundle subiu para ~2,1 MB (Firebase ~+600 kB gzip). Aviso pré-existente. Código-splitting (import dinâmico do Firebase) é evolução pendente opcional.
 

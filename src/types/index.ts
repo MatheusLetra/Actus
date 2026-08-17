@@ -110,6 +110,7 @@ export interface PomodoroSession {
   remainingSeconds: number;
   status: PomodoroSessionStatus;
   startedAt: string;
+  endAt?: string;
   completedAt?: string;
   date: string;
 }

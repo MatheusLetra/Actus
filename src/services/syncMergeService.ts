@@ -38,8 +38,8 @@ function toMilliseconds(input?: string): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function getItemStamp(item: { updatedAt?: string; completedAt?: string; startedAt?: string }, fallback: number): number {
-  const own = toMilliseconds(item.completedAt) || toMilliseconds(item.updatedAt) || toMilliseconds(item.startedAt);
+function getItemStamp(item: { updatedAt?: string; completedAt?: string; endAt?: string; startedAt?: string }, fallback: number): number {
+  const own = toMilliseconds(item.completedAt) || toMilliseconds(item.updatedAt) || toMilliseconds(item.endAt) || toMilliseconds(item.startedAt);
   return own > 0 ? own : fallback;
 }
 
@@ -57,7 +57,7 @@ function mergeById<T extends { id: string }>(
       map.set(item.id, item);
       continue;
     }
-    const stamp = (value: T) => getItemStamp(value as { updatedAt?: string; completedAt?: string; startedAt?: string }, 0);
+    const stamp = (value: T) => getItemStamp(value as { updatedAt?: string; completedAt?: string; endAt?: string; startedAt?: string }, 0);
     const localStamp = stamp(existing) || localUpdatedAt;
     const remoteStamp = stamp(item) || remoteUpdatedAt;
     if (remoteStamp > localStamp) map.set(item.id, item);
@@ -106,12 +106,14 @@ function mergeTombstones(local: SyncTombstone[], remote: SyncTombstone[]): SyncT
 function toPerItemStamp(item: {
   updatedAt?: string;
   completedAt?: string;
+  endAt?: string;
   startedAt?: string;
   createdAt?: string;
 }): number {
   return (
     toMilliseconds(item.updatedAt) ||
     toMilliseconds(item.completedAt) ||
+    toMilliseconds(item.endAt) ||
     toMilliseconds(item.startedAt) ||
     toMilliseconds(item.createdAt) ||
     0
@@ -157,6 +159,12 @@ function mergeSessions(
     const existing = map.get(session.id);
     if (!existing) {
       map.set(session.id, session);
+      continue;
+    }
+    const localTerminal = existing.status === 'completed' || existing.status === 'cancelled';
+    const remoteTerminal = session.status === 'completed' || session.status === 'cancelled';
+    if (localTerminal !== remoteTerminal) {
+      if (remoteTerminal) map.set(session.id, session);
       continue;
     }
     const localStamp = stamp(existing) || localUpdatedAt;

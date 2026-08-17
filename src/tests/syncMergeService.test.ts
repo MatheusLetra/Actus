@@ -157,6 +157,33 @@ describe('syncMergeService', () => {
     expect(merged!.pomodoroSessions[0].completedAt).toBe(nowIso);
   });
 
+  it('should preserve an active session deadline during sync', () => {
+    const endAt = '2026-08-10T10:25:00.000Z';
+    const local = snapshot({
+      pomodoroSessions: [session({ id: 'pomo_1', status: 'running', completedAt: undefined, endAt })],
+    });
+    const remote = snapshot({ pomodoroSessions: [] });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.pomodoroSessions[0].endAt).toBe(endAt);
+  });
+
+  it('should prefer a terminal session over a stale active copy', () => {
+    const local = snapshot({
+      pomodoroSessions: [session({ id: 'pomo_1', status: 'completed', completedAt: nowIso })],
+    });
+    const remote = snapshot({
+      pomodoroSessions: [
+        session({ id: 'pomo_1', status: 'running', completedAt: undefined, endAt: '2026-08-10T10:30:00.000Z' }),
+      ],
+    });
+
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.pomodoroSessions[0].status).toBe('completed');
+  });
+
   it('should pick settings from the side with the newer snapshot timestamp', () => {
     const local = snapshot({ updatedAt: 100, pomodoroSettings: settings({ focusMinutes: 25 }) });
     const remote = snapshot({ updatedAt: 200, pomodoroSettings: settings({ focusMinutes: 50 }) });

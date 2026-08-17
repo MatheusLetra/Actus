@@ -60,6 +60,17 @@ Adicionar um menu **Ferramentas Úteis** (na Sidebar) e a primeira ferramenta: *
 - [x] `npm run build` — build de produção gerado (apenas aviso pré-existente de tamanho de chunk)
 - [x] Smoke test: dev server respondendo HTTP 200 e módulo da página Pomodoro compilando
 
+## Correção de timer em segundo plano
+
+- [x] Deadline absoluto opcional `endAt` em `PomodoroSession`, mantendo compatibilidade com sessões antigas.
+- [x] Restante calculado por `Date.now()`/deadline; `setInterval` é somente um gatilho de atualização da UI.
+- [x] Pause reconcilia o tempo real e remove o deadline; resume cria um novo deadline.
+- [x] Reload reconcilia sessões modernas `running` e as restaura pausadas; sessões pausadas mantêm o restante congelado.
+- [x] `visibilitychange` reconcilia imediatamente ao retornar à aba visível.
+- [x] Conclusão idempotente por sessão, incluindo registro de hábito, integração Kanban, notificação e áudio.
+- [x] Notificação e áudio permanecem best effort conforme permissões e políticas de suspensão/autoplay do navegador; não há garantia de execução com a página congelada.
+- [x] Testes determinísticos para deadline, atraso, expiração, pause/resume, reload legado e sincronização.
+
 ## Anotações de execução
 
 - `pomodoroRepository.add` remove qualquer sessão `running`/`paused` anterior, garantindo **uma única sessão ativa** por vez.

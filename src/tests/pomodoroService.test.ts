@@ -24,6 +24,72 @@ function completedSession(overrides: Partial<PomodoroSession>): PomodoroSession 
 }
 
 describe('pomodoroService', () => {
+  it('should create an absolute deadline and calculate remaining time from it', () => {
+    const now = Date.parse('2026-08-10T10:00:00.000Z');
+    const endAt = pomodoroService.createDeadline(now, 1500);
+
+    expect(endAt).toBe('2026-08-10T10:25:00.000Z');
+    expect(pomodoroService.getRemainingSeconds(endAt, now + 5_001)).toBe(1495);
+    expect(pomodoroService.getRemainingSeconds(endAt, now + 1_499_999)).toBe(1);
+    expect(pomodoroService.getRemainingSeconds(endAt, now + 1_500_000)).toBe(0);
+  });
+
+  it('should clamp invalid or expired deadlines to zero', () => {
+    expect(pomodoroService.getRemainingSeconds('invalid', 1000)).toBe(0);
+    expect(pomodoroService.getRemainingSeconds('1970-01-01T00:00:00.000Z', 1000)).toBe(0);
+  });
+
+  it('should reconcile delayed ticks and detect an expired session', () => {
+    const now = Date.parse('2026-08-10T10:00:00.000Z');
+    const session = completedSession({
+      status: 'running',
+      remainingSeconds: 1500,
+      endAt: new Date(now + 1500 * 1000).toISOString(),
+    });
+
+    expect(pomodoroService.reconcileRunningSession(session, now + 120_000)).toEqual({
+      remainingSeconds: 1380,
+      expired: false,
+    });
+    expect(pomodoroService.reconcileRunningSession(session, now + 1500_000)).toEqual({
+      remainingSeconds: 0,
+      expired: true,
+    });
+  });
+
+  it('should pause from the real deadline and keep paused time frozen', () => {
+    const now = Date.parse('2026-08-10T10:00:00.000Z');
+    const session = completedSession({
+      status: 'running',
+      remainingSeconds: 1500,
+      endAt: new Date(now + 1500 * 1000).toISOString(),
+    });
+    const paused = pomodoroService.pauseSession(session, now + 61_000);
+
+    expect(paused).toEqual({ remainingSeconds: 1439, endAt: undefined });
+    expect(pomodoroService.pauseSession({ ...session, ...paused }, now + 600_000)).toEqual(paused);
+  });
+
+  it('should resume a paused session with a new deadline', () => {
+    const now = Date.parse('2026-08-10T10:00:00.000Z');
+    const resumed = pomodoroService.resumeSession(
+      completedSession({ status: 'paused', remainingSeconds: 1439, endAt: undefined }),
+      now
+    );
+
+    expect(resumed.remainingSeconds).toBe(1439);
+    expect(resumed.endAt).toBe(new Date(now + 1_439_000).toISOString());
+  });
+
+  it('should preserve legacy running sessions without inventing elapsed time', () => {
+    const session = completedSession({ status: 'running', remainingSeconds: 600, endAt: undefined });
+
+    expect(pomodoroService.reconcileRunningSession(session, Date.now())).toEqual({
+      remainingSeconds: 600,
+      expired: false,
+    });
+  });
+
   it('should return default settings', () => {
     expect(settings.focusMinutes).toBe(25);
     expect(settings.shortBreakMinutes).toBe(5);

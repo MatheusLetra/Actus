@@ -15,6 +15,36 @@ const DEFAULT_SETTINGS: PomodoroSettings = {
 };
 
 export const pomodoroService = {
+  createDeadline(now: number, remainingSeconds: number): string {
+    return new Date(now + Math.max(0, remainingSeconds) * 1000).toISOString();
+  },
+
+  getRemainingSeconds(endAt: string, now: number): number {
+    const deadline = new Date(endAt).getTime();
+    if (!Number.isFinite(deadline)) return 0;
+    return Math.max(0, Math.ceil((deadline - now) / 1000));
+  },
+
+  reconcileRunningSession(session: PomodoroSession, now: number): { remainingSeconds: number; expired: boolean } {
+    if (session.status !== 'running' || !session.endAt) {
+      return { remainingSeconds: Math.max(0, session.remainingSeconds), expired: false };
+    }
+    const remainingSeconds = this.getRemainingSeconds(session.endAt, now);
+    return { remainingSeconds, expired: remainingSeconds === 0 };
+  },
+
+  pauseSession(session: PomodoroSession, now: number): Pick<PomodoroSession, 'remainingSeconds' | 'endAt'> {
+    const remainingSeconds = session.endAt
+      ? this.getRemainingSeconds(session.endAt, now)
+      : Math.max(0, session.remainingSeconds);
+    return { remainingSeconds, endAt: undefined };
+  },
+
+  resumeSession(session: PomodoroSession, now: number): Pick<PomodoroSession, 'remainingSeconds' | 'endAt'> {
+    const remainingSeconds = Math.max(0, session.remainingSeconds);
+    return { remainingSeconds, endAt: this.createDeadline(now, remainingSeconds) };
+  },
+
   getDefaultSettings(): PomodoroSettings {
     return { ...DEFAULT_SETTINGS };
   },

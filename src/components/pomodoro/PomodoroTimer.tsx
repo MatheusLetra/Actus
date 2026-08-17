@@ -119,7 +119,7 @@ export const PomodoroTimer: React.FC = () => {
           )}
 
           {hasStarted && (
-            <Button onClick={finishNow} variant="outline" className="min-w-32">
+            <Button onClick={() => finishNow()} variant="outline" className="min-w-32">
               <CheckCircle2 className="w-4 h-4 mr-2 text-emerald-500" />
               Concluir agora
             </Button>
