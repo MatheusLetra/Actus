@@ -14,7 +14,98 @@ const DEFAULT_SETTINGS: PomodoroSettings = {
   linkedTaskId: null,
 };
 
+export interface RetroactiveSessionInput {
+  date: string;
+  startTime: string;
+  durationMinutes: number;
+  habitId?: string | null;
+  taskId?: string | null;
+}
+
+export interface RetroactiveSessionValidation {
+  valid: boolean;
+  errors: Partial<Record<'date' | 'startTime' | 'durationMinutes' | 'habitId' | 'taskId', string>>;
+  session?: Omit<PomodoroSession, 'id'>;
+}
+
 export const pomodoroService = {
+  createRetroactiveSession(
+    input: RetroactiveSessionInput,
+    now: number,
+    validHabitIds?: readonly string[],
+    validTaskIds?: readonly string[],
+  ): RetroactiveSessionValidation {
+    const errors: RetroactiveSessionValidation['errors'] = {};
+    const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.date);
+    const timeMatch = /^(\d{2}):(\d{2})$/.exec(input.startTime);
+
+    if (!dateMatch) {
+      errors.date = 'Informe uma data válida.';
+    }
+    if (!timeMatch) {
+      errors.startTime = 'Informe um horário válido.';
+    }
+    if (!Number.isInteger(input.durationMinutes) || input.durationMinutes <= 0) {
+      errors.durationMinutes = 'Informe uma duração inteira maior que zero.';
+    }
+    if (input.habitId && validHabitIds && !validHabitIds.includes(input.habitId)) {
+      errors.habitId = 'O hábito selecionado não existe mais.';
+    }
+    if (input.taskId && validTaskIds && !validTaskIds.includes(input.taskId)) {
+      errors.taskId = 'A tarefa selecionada não existe mais.';
+    }
+
+    if (dateMatch && timeMatch) {
+      const year = Number(dateMatch[1]);
+      const month = Number(dateMatch[2]);
+      const day = Number(dateMatch[3]);
+      const hour = Number(timeMatch[1]);
+      const minute = Number(timeMatch[2]);
+      const datePartsValid = month >= 1 && month <= 12 && day >= 1 && day <= 31;
+      const timePartsValid = hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+      if (!datePartsValid) errors.date = 'Informe uma data existente.';
+      if (!timePartsValid) errors.startTime = 'Informe um horário existente.';
+
+      const start = new Date(year, month - 1, day, hour, minute, 0, 0);
+      const dateIsNormalized = start.getFullYear() === year
+        && start.getMonth() === month - 1
+        && start.getDate() === day
+        && start.getHours() === hour
+        && start.getMinutes() === minute;
+
+      if (datePartsValid && timePartsValid && (!dateIsNormalized || !Number.isFinite(start.getTime()))) {
+        errors.date = 'Informe uma data e horário existentes.';
+      } else if (datePartsValid && timePartsValid && Number.isInteger(input.durationMinutes) && input.durationMinutes > 0) {
+        const durationSeconds = input.durationMinutes * 60;
+        const completedAt = start.getTime() + durationSeconds * 1000;
+        const end = new Date(completedAt);
+        if (!Number.isFinite(completedAt) || !Number.isFinite(end.getTime()) || completedAt > now) {
+          errors.startTime = 'A sessão não pode terminar no futuro.';
+        }
+
+        if (Object.keys(errors).length === 0) {
+          return {
+            valid: true,
+            errors: {},
+            session: {
+              habitId: input.habitId || undefined,
+              taskId: input.taskId || undefined,
+              cycleType: 'focus',
+              plannedSeconds: durationSeconds,
+              remainingSeconds: 0,
+              status: 'completed',
+              startedAt: start.toISOString(),
+              completedAt: end.toISOString(),
+              date: input.date,
+            },
+          };
+        }
+      }
+    }
+
+    return { valid: false, errors };
+  },
+
   createDeadline(now: number, remainingSeconds: number): string {
     return new Date(now + Math.max(0, remainingSeconds) * 1000).toISOString();
   },

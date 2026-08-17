@@ -134,6 +134,14 @@ Serviço puro (object literal, sem React/Firebase) com entrada `(local, remote)`
 ### Offline
 - Sem internet: sign-in falha com mensagem amigável; o app continua 100% funcional no localStorage. Pushes falham e são repetidos no próximo evento de mudança. Um botão **"Sincronizar agora"** permite forçar a troca de dados quando a conexão voltar.
 
+## Contenção de tempestade de sincronização
+
+Após um incidente confirmado no Firebase Spark, com aproximadamente 42 mil leituras e 20 mil gravações em uma janela curta, o `FirebaseProvider` passou a usar `src/services/firebase/pushCoordinator.ts`. O coordenador mantém separadamente o último payload acknowledged, o payload currently writing e o pending latest. Alterações que surgem durante uma escrita são coalescidas; o sucesso confirma somente o payload efetivamente concluído.
+
+`resource-exhausted` não inicia retry agressivo. Falhas deixam o estado não acknowledged para tentativa posterior por nova alteração, sincronização manual ou reconexão. Snapshots remotos semanticamente iguais ao estado local, acknowledged ou ao resultado já publicado não geram `importData()` nem write-back. A geração da sessão de autenticação invalida resultados tardios de sync após logout ou troca de usuário.
+
+Essa contenção não altera o schema, os paths, os shards, as regras Firestore ou a política de merge. Revision, manifest e CAS continuam adiados.
+
 ## Segurança
 
 ### Regras do Firestore (aplicar no console do Firebase)

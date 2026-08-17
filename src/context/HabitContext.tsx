@@ -54,8 +54,13 @@ interface HabitContextType {
   pomodoroStats: PomodoroStats;
   updatePomodoroSettings: (settings: PomodoroSettings) => void;
   createPomodoroSession: (session: Omit<PomodoroSession, 'id'>) => PomodoroSession;
+  createRetroactivePomodoro: (
+    input: Parameters<typeof pomodoroService.createRetroactiveSession>[0],
+    now?: number,
+  ) => ReturnType<typeof pomodoroService.createRetroactiveSession>;
   updatePomodoroSession: (id: string, updates: Partial<Omit<PomodoroSession, 'id'>>) => void;
   removePomodoroSession: (id: string) => void;
+  removeCompletedPomodoroSession: (id: string) => void;
   clearPomodoroSessions: () => void;
 
   // Kanban State & Actions
@@ -222,6 +227,25 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newSession;
   };
 
+  const createRetroactivePomodoro = (
+    input: Parameters<typeof pomodoroService.createRetroactiveSession>[0],
+    now = Date.now(),
+  ) => {
+    const validation = pomodoroService.createRetroactiveSession(
+      input,
+      now,
+      habits.map((habit) => habit.id),
+      kanbanTasks.map((task) => task.id),
+    );
+    if (!validation.valid || !validation.session) return validation;
+
+    createPomodoroSession(validation.session);
+    if (validation.session.habitId) {
+      completeHabitCompletion(validation.session.habitId, validation.session.date);
+    }
+    return validation;
+  };
+
   const updatePomodoroSession = (id: string, updates: Partial<Omit<PomodoroSession, 'id'>>) => {
     const updated = pomodoroRepository.update(id, updates);
     setPomodoroSessions(updated);
@@ -229,6 +253,14 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const removePomodoroSession = (id: string) => {
     const updated = pomodoroRepository.remove(id);
+    setPomodoroSessions(updated);
+    setTombstones(tombstoneRepository.add('pomodoroSession', id));
+  };
+
+  const removeCompletedPomodoroSession = (id: string) => {
+    const session = pomodoroSessions.find((item) => item.id === id);
+    if (!session || session.status !== 'completed') return;
+    const updated = pomodoroRepository.removeCompleted(id);
     setPomodoroSessions(updated);
     setTombstones(tombstoneRepository.add('pomodoroSession', id));
   };
@@ -458,8 +490,10 @@ export const HabitProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         pomodoroStats,
         updatePomodoroSettings,
         createPomodoroSession,
+        createRetroactivePomodoro,
         updatePomodoroSession,
         removePomodoroSession,
+        removeCompletedPomodoroSession,
         clearPomodoroSessions,
         kanbanBoard,
         kanbanColumns,

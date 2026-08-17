@@ -22,7 +22,9 @@ export const pomodoroRepository = {
 
   add(session: PomodoroSession): PomodoroSession[] {
     const list = this.getAll();
-    const withoutActive = list.filter((s) => s.status !== 'running' && s.status !== 'paused');
+    const withoutActive = session.status === 'running' || session.status === 'paused'
+      ? list.filter((s) => s.status !== 'running' && s.status !== 'paused')
+      : list;
     const updated = [session, ...withoutActive];
     this.saveAll(updated);
     return updated;
@@ -38,6 +40,13 @@ export const pomodoroRepository = {
   remove(id: string): PomodoroSession[] {
     const list = this.getAll();
     const updated = list.filter((s) => s.id !== id);
+    this.saveAll(updated);
+    return updated;
+  },
+
+  removeCompleted(id: string): PomodoroSession[] {
+    const list = this.getAll();
+    const updated = list.filter((s) => s.id !== id || s.status !== 'completed');
     this.saveAll(updated);
     return updated;
   },

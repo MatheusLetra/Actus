@@ -282,6 +282,24 @@ describe('syncMergeService', () => {
     expect(merged!.pomodoroSessions[0].status).toBe('completed');
   });
 
+  it('should preserve a retroactive session when merging with normal sessions', () => {
+    const retroactive = session({ id: 'pomo_retroactive', date: '2026-07-31', completedAt: '2026-07-31T14:25:00.000Z' });
+    const local = snapshot({ pomodoroSessions: [retroactive] });
+    const remote = snapshot({ pomodoroSessions: [session({ id: 'pomo_a' }), session({ id: 'pomo_b' })] });
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.pomodoroSessions.map((item) => item.id)).toEqual(expect.arrayContaining(['pomo_retroactive', 'pomo_a', 'pomo_b']));
+  });
+
+  it('should not resurrect a deleted retroactive session covered by a tombstone', () => {
+    const retroactive = session({ id: 'pomo_retroactive', date: '2026-07-31', completedAt: '2026-07-31T14:25:00.000Z' });
+    const local = snapshot({ pomodoroSessions: [], tombstones: [{ kind: 'pomodoroSession', id: retroactive.id, deletedAt: Date.parse('2026-08-17T15:00:00.000Z') }] });
+    const remote = snapshot({ pomodoroSessions: [retroactive] });
+    const merged = syncMergeService.mergeSnapshots(local, remote);
+
+    expect(merged!.pomodoroSessions).toHaveLength(0);
+  });
+
   it('should pick settings from the side with the newer snapshot timestamp', () => {
     const local = snapshot({ updatedAt: 100, pomodoroSettings: settings({ focusMinutes: 25 }) });
     const remote = snapshot({ updatedAt: 200, pomodoroSettings: settings({ focusMinutes: 50 }) });

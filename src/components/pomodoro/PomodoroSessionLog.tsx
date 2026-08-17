@@ -10,8 +10,9 @@ import { IconRenderer } from '@/components/common/IconRenderer';
 import { History as HistoryIcon, Trash2 } from 'lucide-react';
 
 export const PomodoroSessionLog: React.FC = () => {
-  const { pomodoroSessions, clearPomodoroSessions, habits, kanbanTasks } = useHabits();
+  const { pomodoroSessions, clearPomodoroSessions, removeCompletedPomodoroSession, habits, kanbanTasks } = useHabits();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
 
   const completedSessions = pomodoroSessions
     .filter((s) => s.status === 'completed')
@@ -81,6 +82,16 @@ export const PomodoroSessionLog: React.FC = () => {
                       </Badge>
                     )}
                     <span className="text-xs font-bold text-muted-foreground tabular-nums">{minutes} min</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      title="Excluir sessão do histórico"
+                      aria-label="Excluir sessão do histórico"
+                      onClick={() => setSessionToDelete(session.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
               );
@@ -95,6 +106,16 @@ export const PomodoroSessionLog: React.FC = () => {
         title="Limpar Histórico de Ciclos"
         description="Esta ação remove todos os ciclos de pomodoro registrados. Deseja continuar?"
         onConfirm={clearPomodoroSessions}
+      />
+      <DeleteConfirmDialog
+        open={sessionToDelete !== null}
+        onOpenChange={(open) => { if (!open) setSessionToDelete(null); }}
+        title="Excluir sessão do histórico"
+        description="A sessão será removida do histórico e das estatísticas. A conclusão do hábito não será alterada."
+        onConfirm={() => {
+          if (sessionToDelete) removeCompletedPomodoroSession(sessionToDelete);
+          setSessionToDelete(null);
+        }}
       />
     </Card>
   );

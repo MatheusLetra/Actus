@@ -24,6 +24,77 @@ function completedSession(overrides: Partial<PomodoroSession>): PomodoroSession 
 }
 
 describe('pomodoroService', () => {
+  describe('retroactive sessions', () => {
+    const now = Date.parse('2026-08-17T18:00:00.000Z');
+
+    it('builds a completed local-time focus session with custom duration', () => {
+      const result = pomodoroService.createRetroactiveSession(
+        { date: '2026-08-17', startTime: '14:00', durationMinutes: 25, habitId: 'h1', taskId: 'task_1' },
+        now,
+        ['h1'],
+        ['task_1'],
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.session).toMatchObject({
+        cycleType: 'focus',
+        status: 'completed',
+        plannedSeconds: 1500,
+        remainingSeconds: 0,
+        date: '2026-08-17',
+        habitId: 'h1',
+        taskId: 'task_1',
+      });
+      expect(result.session?.startedAt).toBe(new Date(2026, 7, 17, 14, 0).toISOString());
+      expect(result.session?.completedAt).toBe(new Date(2026, 7, 17, 14, 25).toISOString());
+      expect(result.session).not.toHaveProperty('endAt');
+    });
+
+    it('accepts yesterday and sessions crossing midnight', () => {
+      const result = pomodoroService.createRetroactiveSession(
+        { date: '2026-08-16', startTime: '23:50', durationMinutes: 25 },
+        now,
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.session?.date).toBe('2026-08-16');
+      expect(result.session?.completedAt).toBe(new Date(2026, 7, 17, 0, 15).toISOString());
+    });
+
+    it.each([
+      { durationMinutes: 0, field: 'durationMinutes' },
+      { durationMinutes: -1, field: 'durationMinutes' },
+      { durationMinutes: 25.5, field: 'durationMinutes' },
+    ])('rejects invalid duration $durationMinutes', ({ durationMinutes, field }) => {
+      const result = pomodoroService.createRetroactiveSession(
+        { date: '2026-08-17', startTime: '14:00', durationMinutes },
+        now,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors[field as 'durationMinutes']).toBeDefined();
+    });
+
+    it('rejects invalid dates, times and future completion', () => {
+      expect(pomodoroService.createRetroactiveSession({ date: '2026-02-31', startTime: '14:00', durationMinutes: 25 }, now).valid).toBe(false);
+      expect(pomodoroService.createRetroactiveSession({ date: '2026-08-17', startTime: '25:00', durationMinutes: 25 }, now).valid).toBe(false);
+      expect(pomodoroService.createRetroactiveSession({ date: '2026-08-17', startTime: '17:50', durationMinutes: 25 }, now).valid).toBe(false);
+    });
+
+    it('rejects missing linked entities', () => {
+      const result = pomodoroService.createRetroactiveSession(
+        { date: '2026-08-17', startTime: '14:00', durationMinutes: 25, habitId: 'missing', taskId: 'missing' },
+        now,
+        ['h1'],
+        ['task_1'],
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.habitId).toBeDefined();
+      expect(result.errors.taskId).toBeDefined();
+    });
+  });
+
   it('should create an absolute deadline and calculate remaining time from it', () => {
     const now = Date.parse('2026-08-10T10:00:00.000Z');
     const endAt = pomodoroService.createDeadline(now, 1500);

@@ -4,6 +4,7 @@ import { storageService } from '@/repositories/storageService';
 import { STORAGE_KEYS } from '@/constants';
 import { authService, type SyncUser } from '@/services/firebase/authService';
 import { syncService } from '@/services/firebase/syncService';
+import { createPushCoordinator, type PushCoordinator } from '@/services/firebase/pushCoordinator';
 import { isFirebaseConfigured } from '@/services/firebase/config';
 import { syncMergeService, SYNC_VERSION, type ActusData, type ActusSnapshot } from '@/services/syncMergeService';
 
@@ -78,11 +79,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     tombstones,
   };
 
-  const lastPushedSerializedRef = useRef<string | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncInProgressRef = useRef(false);
-  const pushInProgressRef = useRef(false);
   const unsubscribeWatchRef = useRef<(() => void) | null>(null);
+  const activeUidRef = useRef<string | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const remotePendingRef = useRef<ActusSnapshot | null>(null);
+  const onWriteSettledRef = useRef<() => void>(() => undefined);
+  const pushCoordinatorRef = useRef<PushCoordinator<ActusData> | null>(null);
 
   const localSerialized = useMemo(
     () => JSON.stringify({ categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, tombstones }),
@@ -103,29 +107,45 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const isCurrentSession = (uid: string, generation: number) => (
+    activeUidRef.current === uid && sessionGenerationRef.current === generation
+  );
+
   const applyToLocal = (data: ActusData) => {
     importData(syncMergeService.dataToJson(data));
   };
 
-  const writeToCloud = async (uid: string, data: ActusData, updatedAt: number): Promise<void> => {
-    if (pushInProgressRef.current) return;
-    pushInProgressRef.current = true;
+  const writeToCloud = async (uid: string, data: ActusData, updatedAt: number, generation: number): Promise<void> => {
+    if (!isCurrentSession(uid, generation)) throw new Error('sync-session-invalidated');
     try {
       await syncService.writeSnapshot(uid, data, updatedAt);
-      lastPushedSerializedRef.current = syncMergeService.dataToJson(data);
+      if (!isCurrentSession(uid, generation)) throw new Error('sync-session-invalidated');
       const now = Date.now();
       setLastSyncAt(now);
       setError(null);
       storageService.setItem(STORAGE_KEYS.lastSyncAt, now);
     } catch (err) {
+      if (!isCurrentSession(uid, generation)) throw err;
       const message = getErrorMessage(err);
       if (message) setError(message);
-    } finally {
-      pushInProgressRef.current = false;
+      throw err;
     }
   };
 
-  const runInitialSync = async (uid: string) => {
+  if (pushCoordinatorRef.current === null) {
+    pushCoordinatorRef.current = createPushCoordinator<ActusData>({
+      serialize: (data) => syncMergeService.dataToJson(data),
+      write: async (data) => {
+        const uid = activeUidRef.current;
+        const generation = sessionGenerationRef.current;
+        if (!uid) throw new Error('sync-session-invalidated');
+        await writeToCloud(uid, data, Date.now(), generation);
+      },
+      onSettled: () => onWriteSettledRef.current(),
+    });
+  }
+
+  const runInitialSync = async (uid: string, generation: number) => {
     if (syncInProgressRef.current) return;
     syncInProgressRef.current = true;
     setStatus('syncing');
@@ -134,6 +154,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const localData = dataRef.current;
       const remote = await syncService.readSnapshot(uid);
+      if (!isCurrentSession(uid, generation)) return;
       const localSnapshot = syncMergeService.toSnapshot(localData, Date.now());
       const merged = syncMergeService.mergeSnapshots(localSnapshot, remote);
 
@@ -143,35 +164,53 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           applyToLocal(mergedData);
           dataRef.current = mergedData;
         }
-        await writeToCloud(uid, mergedData, merged.updatedAt);
+        await writeToCloud(uid, mergedData, merged.updatedAt, generation);
+        pushCoordinatorRef.current?.acknowledge(mergedData);
       }
+      if (!isCurrentSession(uid, generation)) return;
       startWatch(uid);
       setStatus('signedIn');
     } catch (err) {
+      if (!isCurrentSession(uid, generation)) return;
       startWatch(uid);
       const message = getErrorMessage(err);
       if (message) setError(message);
       setStatus('signedIn');
     } finally {
-      syncInProgressRef.current = false;
+      if (isCurrentSession(uid, generation)) syncInProgressRef.current = false;
     }
   };
 
-  const handleRemoteSnapshot = (uid: string) => (remote: ActusSnapshot | null) => {
-    if (syncInProgressRef.current) return;
+  const processRemoteSnapshot = (uid: string, generation: number, remote: ActusSnapshot | null) => {
+    if (!isCurrentSession(uid, generation) || syncInProgressRef.current) return;
 
     if (!remote) {
-      if (lastPushedSerializedRef.current === null && dataRef.current) {
-        const now = Date.now();
-        void writeToCloud(uid, dataRef.current, now);
-      }
+      if (!pushCoordinatorRef.current?.getState().acknowledged && dataRef.current) pushCoordinatorRef.current?.request(dataRef.current);
       return;
     }
 
-    const { updatedAt: remoteUpdatedAt, ...remoteData } = remote;
-    if (lastPushedSerializedRef.current === syncMergeService.dataToJson(remoteData)) return;
+    const remoteData = syncMergeService.snapshotToData(remote);
+    const coordinatorState = pushCoordinatorRef.current?.getState();
+    if (coordinatorState?.writing) {
+      remotePendingRef.current = remote;
+      return;
+    }
+
+    if (coordinatorState?.acknowledged === syncMergeService.dataToJson(remoteData)) return;
 
     const localData = dataRef.current;
+    const remoteUpdatedAt = remote.updatedAt;
+    const acknowledgedData = coordinatorState?.acknowledged
+      ? syncMergeService.buildData(JSON.parse(coordinatorState.acknowledged) as Partial<ActusData>)
+      : null;
+    if (acknowledgedData) {
+      const acknowledgedMerge = syncMergeService.mergeSnapshots(
+        syncMergeService.toSnapshot(acknowledgedData, remoteUpdatedAt - 1),
+        remote,
+      );
+      if (acknowledgedMerge && syncMergeService.dataEquals(syncMergeService.snapshotToData(acknowledgedMerge), acknowledgedData)) return;
+    }
+
     const localSnapshot = syncMergeService.toSnapshot(localData, remoteUpdatedAt - 1);
     const merged = syncMergeService.mergeSnapshots(localSnapshot, remote);
 
@@ -180,58 +219,79 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!syncMergeService.dataEquals(mergedData, localData)) {
         applyToLocal(mergedData);
         dataRef.current = mergedData;
-        lastPushedSerializedRef.current = syncMergeService.dataToJson(mergedData);
-        void writeToCloud(uid, mergedData, Math.max(remoteUpdatedAt, Date.now()));
       }
+      if (!syncMergeService.dataEquals(mergedData, remoteData)) pushCoordinatorRef.current?.request(mergedData);
     }
+  };
+
+  const handleRemoteSnapshot = (uid: string, generation: number) => (remote: ActusSnapshot | null) => {
+    if (!isCurrentSession(uid, generation)) return;
+    if (pushCoordinatorRef.current?.getState().writing) {
+      remotePendingRef.current = remote;
+      return;
+    }
+    processRemoteSnapshot(uid, generation, remote);
+  };
+
+  onWriteSettledRef.current = () => {
+    const remote = remotePendingRef.current;
+    remotePendingRef.current = null;
+    const uid = activeUidRef.current;
+    const generation = sessionGenerationRef.current;
+    if (remote && uid) processRemoteSnapshot(uid, generation, remote);
   };
 
   const startWatch = (uid: string) => {
     stopWatch();
-    unsubscribeWatchRef.current = syncService.watchSnapshot(uid, handleRemoteSnapshot(uid));
+    const generation = sessionGenerationRef.current;
+    unsubscribeWatchRef.current = syncService.watchSnapshot(uid, handleRemoteSnapshot(uid, generation));
   };
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
 
     const unsubscribe = authService.onAuthStateChanged((fbUser) => {
+      sessionGenerationRef.current += 1;
+      const generation = sessionGenerationRef.current;
+      pushCoordinatorRef.current?.reset();
+      remotePendingRef.current = null;
+      syncInProgressRef.current = false;
       if (fbUser) {
+        activeUidRef.current = fbUser.uid;
         setUser(fbUser);
         setError(null);
         storageService.setItem(STORAGE_KEYS.syncUser, fbUser);
-        void runInitialSync(fbUser.uid);
+        void runInitialSync(fbUser.uid, generation);
       } else {
+        activeUidRef.current = null;
         setUser(null);
         setStatus('idle');
         setError(null);
         stopWatch();
         cancelPendingPush();
-        lastPushedSerializedRef.current = null;
         storageService.removeItem(STORAGE_KEYS.syncUser);
       }
     });
 
-    return unsubscribe;
+    return () => {
+      sessionGenerationRef.current += 1;
+      activeUidRef.current = null;
+      pushCoordinatorRef.current?.reset();
+      remotePendingRef.current = null;
+      syncInProgressRef.current = false;
+      stopWatch();
+      cancelPendingPush();
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
     if (!user || syncInProgressRef.current) return;
 
-    const serialized = syncMergeService.dataToJson(dataRef.current);
-    if (lastPushedSerializedRef.current === serialized) return;
-
     cancelPendingPush();
     debounceTimerRef.current = setTimeout(() => {
       const data = dataRef.current;
-      if (lastPushedSerializedRef.current === syncMergeService.dataToJson(data)) return;
-      const attemptPush = () => {
-        if (pushInProgressRef.current) {
-          debounceTimerRef.current = setTimeout(attemptPush, SYNC_DEBOUNCE_MS);
-          return;
-        }
-        void writeToCloud(user.uid, data, Date.now());
-      };
-      attemptPush();
+      pushCoordinatorRef.current?.request(data);
     }, SYNC_DEBOUNCE_MS);
 
     return cancelPendingPush;
@@ -241,6 +301,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => {
       stopWatch();
       cancelPendingPush();
+      pushCoordinatorRef.current?.reset();
     };
   }, []);
 
@@ -269,10 +330,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const syncNow = async (): Promise<void> => {
     if (!user || syncInProgressRef.current) return;
+    const uid = user.uid;
+    const generation = sessionGenerationRef.current;
     syncInProgressRef.current = true;
     setStatus('syncing');
     try {
-      const remote = await syncService.readSnapshot(user.uid);
+      const remote = await syncService.readSnapshot(uid);
+      if (!isCurrentSession(uid, generation)) return;
       const localData = dataRef.current;
       const localSnapshot = syncMergeService.toSnapshot(localData, Date.now());
       const merged = syncMergeService.mergeSnapshots(localSnapshot, remote);
@@ -282,15 +346,17 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           applyToLocal(mergedData);
           dataRef.current = mergedData;
         }
-        await writeToCloud(user.uid, mergedData, merged.updatedAt);
+        pushCoordinatorRef.current?.request(mergedData);
+        pushCoordinatorRef.current?.retry();
       }
       setStatus('signedIn');
     } catch (err) {
+      if (!isCurrentSession(uid, generation)) return;
       const message = getErrorMessage(err);
       if (message) setError(message);
       setStatus('signedIn');
     } finally {
-      syncInProgressRef.current = false;
+      if (isCurrentSession(uid, generation)) syncInProgressRef.current = false;
     }
   };
 

@@ -93,3 +93,12 @@ Adicionar um menu **Ferramentas Úteis** (na Sidebar) e a primeira ferramenta: *
 - Permitir selecionar o hábito vinculado por sessão (hoje é um vínculo global no settings).
 - Reagendar/editar ciclos registrados retroativamente.
 
+## Lançamento retroativo de foco
+
+- [x] Registrar somente focos concluídos fora do Actus com data, hora inicial e duração manual positiva.
+- [x] Construir diretamente uma `PomodoroSession` concluída em horário local, rejeitando datas inválidas e términos futuros; sessões podem atravessar meia-noite e são agrupadas pelo dia do início.
+- [x] Preservar sessões `running`/`paused` ao inserir uma sessão retroativa.
+- [x] Aplicar a conclusão idempotente de Habit na data histórica, sem executar áudio, notificação, auto-start ou avanço Kanban.
+- [x] Permitir exclusão individual de sessões concluídas pelo histórico, com tombstone e sem desfazer `HabitCompletion`.
+- [x] Reutilizar estatísticas, backup/restore, shard mensal, Firebase e merge existentes sem novo tipo ou schema.
+

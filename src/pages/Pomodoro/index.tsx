@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useHabits } from '@/context/HabitContext';
 import { PomodoroTimer } from '@/components/pomodoro/PomodoroTimer';
 import { PomodoroSettingsForm } from '@/components/pomodoro/PomodoroSettingsForm';
@@ -7,10 +7,13 @@ import { PomodoroDailyChart } from '@/components/charts/PomodoroDailyChart';
 import { PomodoroHabitChart } from '@/components/charts/PomodoroHabitChart';
 import { PomodoroCycleDistribution } from '@/components/charts/PomodoroCycleDistribution';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Flame, Clock, Repeat, CalendarCheck } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { PomodoroRetroactiveDialog } from '@/components/pomodoro/PomodoroRetroactiveDialog';
+import { Flame, Clock, Repeat, CalendarCheck, History } from 'lucide-react';
 
 export const PomodoroPage: React.FC = () => {
   const { pomodoroStats } = useHabits();
+  const [retroactiveOpen, setRetroactiveOpen] = useState(false);
 
   const statCards = [
     {
@@ -45,11 +48,17 @@ export const PomodoroPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      <div>
-        <h2 className="text-lg font-bold text-foreground">Pomodoro</h2>
-        <p className="text-xs text-muted-foreground">
-          Técnica de foco em blocos de tempo, com pausas curtas e longas. Configurável, com registro automático de ciclos.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Pomodoro</h2>
+          <p className="text-xs text-muted-foreground">
+            Técnica de foco em blocos de tempo, com pausas curtas e longas. Configurável, com registro automático de ciclos.
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => setRetroactiveOpen(true)} className="w-full sm:w-auto">
+          <History className="mr-2 h-4 w-4" />
+          Registrar Pomodoro
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -111,6 +120,7 @@ export const PomodoroPage: React.FC = () => {
       </Card>
 
       <PomodoroSessionLog />
+      <PomodoroRetroactiveDialog open={retroactiveOpen} onOpenChange={setRetroactiveOpen} />
     </div>
   );
 };

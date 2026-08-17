@@ -140,8 +140,10 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 - Sessão `running` persiste `endAt`; pausa reconcilia pelo relógio real, congela `remainingSeconds` e remove o deadline; resume cria um novo deadline. Ao recarregar, uma sessão moderna ainda em andamento é reconciliada e restaurada como **pausada** (retomada manual), enquanto sessões pausadas mantêm o restante congelado.
 - A reconciliação ocorre nos ticks e imediatamente ao retornar a uma aba visível. A conclusão é idempotente por sessão, protegendo registro, hábito, Kanban, notificação e áudio contra callbacks duplicados.
 - Foco concluído = registro automático (`status: 'completed'`); se houver hábito vinculado, marca a conclusão do hábito na data (respeitando `active` e `isHabitScheduledOnDate`).
+- Foco retroativo é criado diretamente como sessão `completed` por `pomodoroService.createRetroactiveSession`, usando data/hora local de início, duração manual positiva e término não futuro. Ele pode coexistir com uma sessão `running`/`paused`, não executa efeitos do timer e conclui Habit na data histórica quando as regras atuais permitirem.
 - `PomodoroSessionLog` exibe badges com o nome do hábito (variante `secondary`) e/ou da tarefa do quadro (variante `outline`) vinculados ao ciclo; no mobile o item empilha (texto + badges em linhas separadas) para evitar sobreposição.
 - Vínculo de tarefa do Kanban (`linkedTaskId`): ao iniciar um foco, `taskId` é gravado na sessão; ao concluir, o `KanbanAdvanceDialog` pergunta se deseja avançar a tarefa e lista as colunas destino (exceto a atual). O vínculo de hábito não é alterado.
+- Lançamentos retroativos podem preservar `taskId` como metadata histórica, mas nunca movem a tarefa nem abrem o diálogo de avanço. Sessões `completed` podem ser removidas individualmente pelo histórico; essa exclusão usa tombstone e não desfaz `HabitCompletion`.
 - Notificação via Notification API e som via `public/pomodoro-chime.wav` (fallback Web Audio), ambos configuráveis e best effort: não há garantia quando o navegador suspende completamente a página ou bloqueia autoplay.
 
 ## Kanban (detalhes de implementação)
@@ -159,10 +161,16 @@ Dados corrompidos são interceptados por `storageService` (try/catch) com fallba
 
 - **Autenticação**: Firebase Auth com `GoogleAuthProvider` (`src/services/firebase/authService.ts`); estado via `onAuthStateChanged`; sessão persistida no navegador. Credenciais em `.env` (`VITE_FIREBASE_*`), lidas em `src/services/firebase/config.ts` (sem `initializeApp` se ausentes, e o card é ocultado).
 - **Persistência remota**: Cloud Firestore com núcleo por usuário (`users/{uid}`: categories, habits, settings, kanban) e **subcoleções mensais** para as listas que crescem (`completions/YYYY-MM`, `pomodoro/YYYY-MM`) — evita o limite de 1 MB/documento. `syncService.readSnapshot` recombina os meses; `writeSnapshot` reparticiona e remove meses órfãos.
-- **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). A guarda anti-eco identifica o conteúdo do último write, e a aplicação compara dados de domínio sem considerar o `updatedAt` global do snapshot.
+- **`FirebaseProvider`** (dentro de `HabitProvider` em `src/App.tsx`): ao logar faz merge local+nuvem e aplica nos dois lados; escuta `onSnapshot` (nuvem → local) e faz push com debounce (local → nuvem). `pushCoordinator` separa payload acknowledged, writing e pending, coalesceia o estado mais recente durante uma escrita e só confirma o payload após sucesso. Snapshots remotos semanticamente iguais, inclusive callbacks intermediários do próprio write, não geram import ou write-back.
 - **`syncMergeService`** (puro): `mergeSnapshots` — união por `id` com last-writer-wins por item. `Habit.updatedAt` resolve LWW integral por hábito; hábitos legados sem o campo usam o timestamp global somente entre cópias legadas. Completions usam `updatedAt`/tombstones; kanban é reordenado/reindexado após o merge. O payload Firebase remove propriedades `undefined` sem alterar o estado original.
 - **Regras Firestore** no console: `match /users/{userId}` + subcoleções com `allow read, write: if request.auth.uid == userId`.
 - **UI**: `CloudSyncCard` em Configurações (login, "Sincronizar agora", "Sair"); rodapé da página indica status de sync.
+
+### Contenção de tempestade de sincronização
+
+Após um incidente de quota no Firebase Spark (aproximadamente 42 mil leituras e 20 mil gravações em uma janela curta), a coordenação local passou a manter explicitamente três estados: último payload confirmado, payload atualmente em escrita e estado local mais recente pendente. Falhas, incluindo `resource-exhausted`, não confirmam o payload e não iniciam retry agressivo. A sessão de autenticação invalida operações assíncronas antigas para impedir listeners ou writes tardios após logout/troca de usuário.
+
+O custo estrutural do snapshot permanece: cada publicação grava o core, todos os shards presentes e remove shards obsoletos após consultar as coleções. Revision, manifest, CAS, novos paths, schema e Firestore Rules continuam fora do escopo.
 
 ### Dívida técnica de sincronização
 
