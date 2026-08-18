@@ -4,9 +4,11 @@ import { storageService } from '@/repositories/storageService';
 import { STORAGE_KEYS } from '@/constants';
 import { authService, type SyncUser } from '@/services/firebase/authService';
 import { syncService } from '@/services/firebase/syncService';
-import { createPushCoordinator, type PushCoordinator } from '@/services/firebase/pushCoordinator';
+import { createPushCoordinator, type PushCoordinator, type PushRequestMetadata } from '@/services/firebase/pushCoordinator';
 import { isFirebaseConfigured } from '@/services/firebase/config';
 import { syncMergeService, SYNC_VERSION, type ActusData, type ActusSnapshot } from '@/services/syncMergeService';
+import { syncDiagnostics, summarizeData } from '@/services/firebase/syncDiagnostics';
+import { createSyncQuotaGuard, SyncQuotaGuardBlockedError } from '@/services/firebase/syncQuotaGuard';
 
 export type SyncStatus = 'idle' | 'connecting' | 'syncing' | 'signedIn' | 'signingOut';
 
@@ -88,8 +90,24 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const activeUidRef = useRef<string | null>(null);
   const sessionGenerationRef = useRef(0);
   const remotePendingRef = useRef<ActusSnapshot | null>(null);
+  const remotePendingAvailableRef = useRef(false);
   const onWriteSettledRef = useRef<() => void>(() => undefined);
+  const lastWrittenUpdatedAtRef = useRef<number | null>(null);
+  const lastStaleRemoteKeyRef = useRef<string | null>(null);
+  const remoteAppliedDataRef = useRef<ActusData | null>(null);
   const pushCoordinatorRef = useRef<PushCoordinator<ActusData> | null>(null);
+  const quotaGuardRef = useRef<ReturnType<typeof createSyncQuotaGuard> | null>(null);
+  if (quotaGuardRef.current === null) {
+    quotaGuardRef.current = createSyncQuotaGuard({
+      enabled: syncDiagnostics.enabled,
+      onBlocked: ({ count, limit, windowMs }) => syncDiagnostics.log('QUOTA_GUARD_BLOCKED', {
+        count,
+        limit,
+        windowMs,
+        reason: 'write_snapshot_budget_exhausted',
+      }),
+    });
+  }
 
   const localSerialized = useMemo(
     () => JSON.stringify({ categories, habits, completions, pomodoroSettings, pomodoroSessions, kanbanBoard, kanbanColumns, kanbanTasks, projects, tombstones }),
@@ -115,19 +133,93 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const applyToLocal = (data: ActusData) => {
+    remoteAppliedDataRef.current = data;
     importData(syncMergeService.dataToJson(data));
   };
 
-  const writeToCloud = async (uid: string, data: ActusData, updatedAt: number, generation: number): Promise<void> => {
+  const requestPush = (data: ActusData, source: string, reason: string) => {
+    if (source === 'remote_writeback') {
+      syncDiagnostics.log('REMOTE_WRITEBACK_REQUESTED', () => ({ payload: summarizeData(data).snapshotHash, source, reason }));
+    }
+    pushCoordinatorRef.current?.request(data, { source, reason });
+  };
+
+  const deferRemoteSnapshot = (remote: ActusSnapshot | null, reason: string) => {
+    if (remotePendingAvailableRef.current && remotePendingRef.current && remote) {
+      remotePendingRef.current = syncMergeService.mergeSnapshots(remotePendingRef.current, remote);
+    } else {
+      remotePendingRef.current = remote;
+    }
+    remotePendingAvailableRef.current = true;
+    syncDiagnostics.log('REMOTE_DEFERRED', () => ({
+      reason,
+      payload: remote ? summarizeData(remote).snapshotHash : 'null',
+      pendingPayload: remotePendingRef.current ? summarizeData(remotePendingRef.current).snapshotHash : 'null',
+    }));
+  };
+
+  const isRemoteEqualToWriting = (remote: ActusSnapshot | null): boolean => {
+    if (!remote) return false;
+    const writing = pushCoordinatorRef.current?.getState().writing;
+    if (!writing) return false;
+    const writingData = syncMergeService.buildData(JSON.parse(writing) as Partial<ActusData>);
+    return syncMergeService.dataEquals(syncMergeService.snapshotToData(remote), writingData);
+  };
+
+  const writeToCloud = async (
+    uid: string,
+    data: ActusData,
+    generation: number,
+    source = 'other',
+  ): Promise<ActusData> => {
     if (!isCurrentSession(uid, generation)) throw new Error('sync-session-invalidated');
     try {
-      await syncService.writeSnapshot(uid, data, updatedAt);
+      if (!syncDiagnostics.writesEnabled) {
+        syncDiagnostics.log('QUOTA_GUARD_BLOCKED', {
+          reason: 'diagnostic_mode_no_writes',
+          source,
+          payload: summarizeData(data).snapshotHash,
+        });
+        throw new SyncQuotaGuardBlockedError(
+          (quotaGuardRef.current?.getCount() ?? 0) + 1,
+          0,
+        );
+      }
+      quotaGuardRef.current?.consume();
+      if (source === 'initial_sync') {
+        syncDiagnostics.log('PUSH_START', () => ({
+          payload: summarizeData(data).snapshotHash,
+          source,
+          reason: 'initial_sync',
+        }));
+      }
+      const result = await syncService.publishSnapshot(uid, data);
+      if (!syncMergeService.dataEquals(result.data, data)) {
+        applyToLocal(result.data);
+        dataRef.current = result.data;
+      }
+      if (result.published) lastWrittenUpdatedAtRef.current = result.publishedAt;
+      if (source === 'initial_sync') {
+        syncDiagnostics.log('PUSH_SUCCESS', () => ({
+          payload: summarizeData(data).snapshotHash,
+          source,
+          acknowledged: summarizeData(data).snapshotHash,
+        }));
+      }
       if (!isCurrentSession(uid, generation)) throw new Error('sync-session-invalidated');
       const now = Date.now();
       setLastSyncAt(now);
       setError(null);
       storageService.setItem(STORAGE_KEYS.lastSyncAt, now);
+      return result.data;
     } catch (err) {
+      if (source === 'initial_sync') {
+        syncDiagnostics.log('PUSH_ERROR', () => ({
+          payload: summarizeData(data).snapshotHash,
+          source,
+          code: (err as { code?: string }).code,
+        }));
+      }
       if (!isCurrentSession(uid, generation)) throw err;
       const message = getErrorMessage(err);
       if (message) setError(message);
@@ -138,19 +230,22 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   if (pushCoordinatorRef.current === null) {
     pushCoordinatorRef.current = createPushCoordinator<ActusData>({
       serialize: (data) => syncMergeService.dataToJson(data),
-      write: async (data) => {
+      write: async (data, metadata: PushRequestMetadata = {}) => {
         const uid = activeUidRef.current;
         const generation = sessionGenerationRef.current;
         if (!uid) throw new Error('sync-session-invalidated');
-        await writeToCloud(uid, data, Date.now(), generation);
+        return writeToCloud(uid, data, generation, metadata.source ?? 'other');
       },
       onSettled: () => onWriteSettledRef.current(),
+      diagnostics: syncDiagnostics,
+      diagnosticFingerprint: (data) => summarizeData(data).snapshotHash,
     });
   }
 
   const runInitialSync = async (uid: string, generation: number) => {
     if (syncInProgressRef.current) return;
     syncInProgressRef.current = true;
+    syncDiagnostics.log('INITIAL_SYNC_START', { generation, uid: maskUid(uid) });
     setStatus('syncing');
     stopWatch();
     cancelPendingPush();
@@ -167,51 +262,86 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           applyToLocal(mergedData);
           dataRef.current = mergedData;
         }
-        await writeToCloud(uid, mergedData, merged.updatedAt, generation);
-        pushCoordinatorRef.current?.acknowledge(mergedData);
+        const remoteData = remote ? syncMergeService.snapshotToData(remote) : null;
+        if (remoteData && syncMergeService.dataEquals(mergedData, remoteData)) {
+          pushCoordinatorRef.current?.acknowledge(mergedData);
+        } else {
+          const publishedData = await writeToCloud(uid, mergedData, generation, 'initial_sync');
+          pushCoordinatorRef.current?.acknowledge(publishedData);
+        }
       }
       if (!isCurrentSession(uid, generation)) return;
       startWatch(uid);
       setStatus('signedIn');
+      syncDiagnostics.log('INITIAL_SYNC_END', { generation, uid: maskUid(uid), status: 'success' });
     } catch (err) {
       if (!isCurrentSession(uid, generation)) return;
       startWatch(uid);
       const message = getErrorMessage(err);
       if (message) setError(message);
       setStatus('signedIn');
+      syncDiagnostics.log('INITIAL_SYNC_END', {
+        generation,
+        uid: maskUid(uid),
+        status: 'error',
+        code: (err as { code?: string }).code,
+      });
     } finally {
       if (isCurrentSession(uid, generation)) syncInProgressRef.current = false;
     }
   };
 
   const processRemoteSnapshot = (uid: string, generation: number, remote: ActusSnapshot | null) => {
-    if (!isCurrentSession(uid, generation) || syncInProgressRef.current) return;
+    if (!isCurrentSession(uid, generation)) {
+      syncDiagnostics.log('REMOTE_IGNORED', { reason: 'stale_session' });
+      return;
+    }
 
     if (!remote) {
-      if (!pushCoordinatorRef.current?.getState().acknowledged && dataRef.current) pushCoordinatorRef.current?.request(dataRef.current);
+      syncDiagnostics.log('REMOTE_IGNORED', { reason: 'remote_missing' });
+      if (!pushCoordinatorRef.current?.getState().acknowledged && dataRef.current) {
+        requestPush(dataRef.current, 'remote_missing', 'remote_snapshot_missing');
+      }
       return;
     }
 
-    const remoteData = syncMergeService.snapshotToData(remote);
     const coordinatorState = pushCoordinatorRef.current?.getState();
-    if (coordinatorState?.writing) {
-      remotePendingRef.current = remote;
-      return;
-    }
-
-    if (coordinatorState?.acknowledged === syncMergeService.dataToJson(remoteData)) return;
-
-    const localData = dataRef.current;
-    const remoteUpdatedAt = remote.updatedAt;
+    const remoteData = syncMergeService.snapshotToData(remote);
     const acknowledgedData = coordinatorState?.acknowledged
       ? syncMergeService.buildData(JSON.parse(coordinatorState.acknowledged) as Partial<ActusData>)
       : null;
+
+    if (acknowledgedData && syncMergeService.dataEquals(acknowledgedData, remoteData)) {
+      syncDiagnostics.log('REMOTE_IGNORED', () => ({ reason: 'equals_acknowledged', payload: summarizeData(remoteData).snapshotHash }));
+      return;
+    }
+
+    const localData = dataRef.current;
+    const remoteUpdatedAt = remote.updatedAt;
     if (acknowledgedData) {
       const acknowledgedMerge = syncMergeService.mergeSnapshots(
         syncMergeService.toSnapshot(acknowledgedData, remoteUpdatedAt - 1),
         remote,
       );
-      if (acknowledgedMerge && syncMergeService.dataEquals(syncMergeService.snapshotToData(acknowledgedMerge), acknowledgedData)) return;
+      if (acknowledgedMerge && syncMergeService.dataEquals(syncMergeService.snapshotToData(acknowledgedMerge), acknowledgedData)) {
+        if (remote.updatedAt === lastWrittenUpdatedAtRef.current) {
+          syncDiagnostics.log('REMOTE_IGNORED', () => ({ reason: 'covered_by_acknowledged_local_write', payload: summarizeData(remoteData).snapshotHash }));
+        } else {
+          const staleKey = `${remote.updatedAt}:${summarizeData(remoteData).snapshotHash}`;
+          if (lastStaleRemoteKeyRef.current === staleKey) {
+            syncDiagnostics.log('REMOTE_IGNORED', { reason: 'stale_already_republished' });
+          } else {
+            lastStaleRemoteKeyRef.current = staleKey;
+            syncDiagnostics.log('REMOTE_STALE', { payload: summarizeData(remoteData).snapshotHash });
+            pushCoordinatorRef.current?.request(acknowledgedData, {
+              source: 'remote_writeback',
+              reason: 'remote_stale_against_acknowledged',
+              forceAcknowledged: true,
+            });
+          }
+        }
+        return;
+      }
     }
 
     const localSnapshot = syncMergeService.toSnapshot(localData, remoteUpdatedAt - 1);
@@ -219,18 +349,40 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (merged) {
       const mergedData = syncMergeService.snapshotToData(merged);
-      if (!syncMergeService.dataEquals(mergedData, localData)) {
+      const changed = !syncMergeService.dataEquals(mergedData, localData);
+      if (changed) {
         applyToLocal(mergedData);
         dataRef.current = mergedData;
+        syncDiagnostics.log('REMOTE_IMPORTED', () => ({ payload: summarizeData(mergedData).snapshotHash }));
       }
-      if (!syncMergeService.dataEquals(mergedData, remoteData)) pushCoordinatorRef.current?.request(mergedData);
+      if (!syncMergeService.dataEquals(mergedData, remoteData)) {
+        requestPush(mergedData, 'remote_writeback', 'merge_differs_remote');
+      }
+      syncDiagnostics.log('REMOTE_RECONCILED', () => ({
+        remote: summarizeData(remoteData).snapshotHash,
+        merged: summarizeData(mergedData).snapshotHash,
+        changed,
+      }));
     }
   };
 
   const handleRemoteSnapshot = (uid: string, generation: number) => (remote: ActusSnapshot | null) => {
     if (!isCurrentSession(uid, generation)) return;
+    syncDiagnostics.log('REMOTE_RECEIVED', () => ({
+      uid: maskUid(uid),
+      generation,
+      payload: remote ? summarizeData(remote).snapshotHash : 'null',
+    }));
     if (pushCoordinatorRef.current?.getState().writing) {
-      remotePendingRef.current = remote;
+      if (isRemoteEqualToWriting(remote)) {
+        syncDiagnostics.log('REMOTE_IGNORED', { reason: 'equals_writing_payload' });
+      } else {
+        deferRemoteSnapshot(remote, 'write_in_progress');
+      }
+      return;
+    }
+    if (syncInProgressRef.current) {
+      deferRemoteSnapshot(remote, 'sync_in_progress');
       return;
     }
     processRemoteSnapshot(uid, generation, remote);
@@ -239,9 +391,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   onWriteSettledRef.current = () => {
     const remote = remotePendingRef.current;
     remotePendingRef.current = null;
+    const hasPendingRemote = remotePendingAvailableRef.current;
+    remotePendingAvailableRef.current = false;
     const uid = activeUidRef.current;
     const generation = sessionGenerationRef.current;
-    if (remote && uid) processRemoteSnapshot(uid, generation, remote);
+    if (hasPendingRemote && uid) processRemoteSnapshot(uid, generation, remote);
   };
 
   const startWatch = (uid: string) => {
@@ -257,15 +411,22 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       sessionGenerationRef.current += 1;
       const generation = sessionGenerationRef.current;
       pushCoordinatorRef.current?.reset();
+      quotaGuardRef.current?.reset();
       remotePendingRef.current = null;
+      remotePendingAvailableRef.current = false;
+      lastWrittenUpdatedAtRef.current = null;
+      lastStaleRemoteKeyRef.current = null;
+      remoteAppliedDataRef.current = null;
       syncInProgressRef.current = false;
       if (fbUser) {
         activeUidRef.current = fbUser.uid;
         setUser(fbUser);
         setError(null);
+        syncDiagnostics.log('SYNC_SESSION_START', { generation, uid: maskUid(fbUser.uid) });
         storageService.setItem(STORAGE_KEYS.syncUser, fbUser);
         void runInitialSync(fbUser.uid, generation);
       } else {
+        syncDiagnostics.log('SYNC_SESSION_STOP', { generation });
         activeUidRef.current = null;
         setUser(null);
         setStatus('idle');
@@ -277,10 +438,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     return () => {
+      syncDiagnostics.log('SYNC_SESSION_STOP', { generation: sessionGenerationRef.current, reason: 'provider_cleanup' });
       sessionGenerationRef.current += 1;
       activeUidRef.current = null;
       pushCoordinatorRef.current?.reset();
+      quotaGuardRef.current?.reset();
       remotePendingRef.current = null;
+      remotePendingAvailableRef.current = false;
+      lastWrittenUpdatedAtRef.current = null;
+      lastStaleRemoteKeyRef.current = null;
+      remoteAppliedDataRef.current = null;
       syncInProgressRef.current = false;
       stopWatch();
       cancelPendingPush();
@@ -291,10 +458,24 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!user || syncInProgressRef.current) return;
 
+    if (remoteAppliedDataRef.current) {
+      if (syncMergeService.dataEquals(dataRef.current, remoteAppliedDataRef.current)) {
+        remoteAppliedDataRef.current = null;
+        return;
+      }
+      remoteAppliedDataRef.current = null;
+    }
+
+    syncDiagnostics.log('LOCAL_CHANGED', () => ({
+      uid: maskUid(user.uid),
+      payload: summarizeData(dataRef.current).snapshotHash,
+      reason: 'local_serialized_changed',
+    }));
     cancelPendingPush();
+    syncDiagnostics.log('PUSH_SCHEDULED', { source: 'local_change', reason: 'local_serialized_changed' });
     debounceTimerRef.current = setTimeout(() => {
       const data = dataRef.current;
-      pushCoordinatorRef.current?.request(data);
+      requestPush(data, 'local_change', 'local_serialized_changed');
     }, SYNC_DEBOUNCE_MS);
 
     return cancelPendingPush;
@@ -302,6 +483,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     return () => {
+      syncDiagnostics.log('SYNC_SESSION_STOP', { reason: 'provider_unmount' });
       stopWatch();
       cancelPendingPush();
       pushCoordinatorRef.current?.reset();
@@ -349,8 +531,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           applyToLocal(mergedData);
           dataRef.current = mergedData;
         }
-        pushCoordinatorRef.current?.request(mergedData);
-        pushCoordinatorRef.current?.retry();
+        const remoteData = remote ? syncMergeService.snapshotToData(remote) : null;
+        if (remoteData && syncMergeService.dataEquals(mergedData, remoteData)) {
+          pushCoordinatorRef.current?.acknowledge(mergedData);
+        } else {
+          requestPush(mergedData, 'manual_sync', 'sync_now');
+          pushCoordinatorRef.current?.retry();
+        }
       }
       setStatus('signedIn');
     } catch (err) {
@@ -359,7 +546,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (message) setError(message);
       setStatus('signedIn');
     } finally {
-      if (isCurrentSession(uid, generation)) syncInProgressRef.current = false;
+      if (isCurrentSession(uid, generation)) {
+        syncInProgressRef.current = false;
+        if (!pushCoordinatorRef.current?.getState().writing && remotePendingAvailableRef.current) {
+          onWriteSettledRef.current();
+        }
+      }
     }
   };
 
@@ -388,3 +580,7 @@ export const useFirebase = () => {
   }
   return context;
 };
+
+function maskUid(uid: string): string {
+  return syncDiagnostics.fingerprint(uid).canonical;
+}

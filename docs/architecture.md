@@ -179,6 +179,16 @@ O custo estrutural do snapshot permanece: cada publicação grava o core, todos 
 
 `Category`, `KanbanColumn` e `PomodoroSettings` ainda dependem do timestamp global para conflitos porque não possuem versionamento próprio equivalente a `Habit.updatedAt`. Eles permanecem fora do escopo da correção de hábitos.
 
+### Diagnóstico temporário de quota
+
+`src/services/firebase/syncDiagnostics.ts` e `syncQuotaGuard.ts` formam uma camada temporária DEV-only. Ela registra eventos de sessão, listeners, snapshots, fingerprints, origem dos pushes e shards sem conteúdo pessoal. O fingerprint possui hash RAW e canonical; o segundo ordena somente chaves de objetos e preserva a ordem dos arrays.
+
+O limite temporário é de 3 `writeSnapshot` reais em uma janela móvel de 60 segundos. O quarto write é bloqueado antes do Firestore, não vira `acknowledged` e não é reentraiado; o contador é reiniciado em nova sessão de autenticação. Use `?actusSyncMode=no-writes` para listeners ativos com writes bloqueados ou `?actusSyncMode=no-listeners` para bloquear listeners e writes. A reconciliação agora acumula remotos recebidos durante writes, diferencia igualdade real do payload em escrita e trata remoto stale com write-back controlado. Esta camada ainda é temporária e não substitui garantias distribuídas ausentes do schema atual.
+
+### Publicação versionada Firebase
+
+Contas migradas usam revisões imutáveis em `users/{uid}/revisions/{revision}` e um manifest isolado em `users/{uid}/manifest/current`. O manifest declara `currentRevision`, `previousRevision`, `publishedAt` e os meses de cada shard. O core e todos os shards da revisão são escritos antes da troca transacional do manifest; o reader v2 lê somente os meses declarados e rejeita revisão incompleta ou divergente. O listener v2 observa somente o manifest. Contas sem manifest continuam no reader legado e migram no primeiro publish necessário; dados legados não são apagados. O manifest separado evita que cliente v1 sobrescreva o marcador v2, embora writes v1 posteriores permaneçam invisíveis para clientes v2.
+
 ## Padrões de Código
 
 - Separation of Concerns em camadas; services como object literals (sem classes).

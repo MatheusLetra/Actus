@@ -10,7 +10,7 @@ Documento de handoff para retomar o trabalho no repositório a partir de onde pa
 - `KanbanTask.projectId` é opcional, com no máximo um projeto por tarefa; tarefas legadas continuam válidas.
 - Projects persistem em `actus:projects`, participam do backup v3, `ActusData`, merge LWW e tombstones.
 - Exclusão de Project remove associações das tarefas e impede ressurreição durante merge offline.
-- Projects viajam no core Firebase existente, sem path, shard ou listener novo; `pushCoordinator` não foi alterado.
+- Projects viajam no core Firebase existente, sem path, shard ou listener novo; o `pushCoordinator` recebeu somente metadata DEV-only de diagnóstico nesta rodada.
 - Gerenciamento, seletor no Task Dialog e badge textual com indicador de cor foram implementados. Filtro permanece fora do MVP.
 
 O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **Sincronização com Google/Firebase** foram implementadas, com **todas as etapas concluídas e validadas**:
@@ -25,6 +25,8 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - **Correção de bug (rodada 8 — formulário e comparação de snapshots)**: `HabitFormDialog` só reinicializa ao abrir ou trocar o `Habit.id`; `categories` não apaga mais edições locais. `FirebaseContext` normaliza `ActusSnapshot` para `ActusData` antes de decidir `importData()`, ignorando apenas metadata global. A suíte passou com **73 testes**.
 - **Evolução — Pomodoro retroativo**: a página Pomodoro permite registrar focos concluídos fora do Actus com data, hora local e duração manual. A sessão nasce diretamente `completed`, preserva uma sessão ativa existente, conclui Habit na data histórica quando aplicável, mantém Task apenas como metadata e pode ser excluída individualmente via tombstone sem remover a completion do Habit.
 - **Contenção de tempestade Firebase**: `pushCoordinator` separa acknowledged/writing/pending, coalesceia alterações durante writes, confirma somente após sucesso e impede retry agressivo de `resource-exhausted`. Callbacks intermediários dos três listeners são reconciliados sem write-back quando já estão cobertos pelo payload confirmado. Logout/troca de usuário invalida syncs assíncronos antigos.
+- **Diagnóstico e hardening temporários**: `syncDiagnostics` registra eventos DEV-only com hashes RAW/canonical, hashes separados de core/completions/pomodoro, watch id e origem dos pushes. A comparação usa a mesma serialização canônica da fronteira Firestore (`undefined` em objetos equivale a ausência; `null` permanece distinto; arrays preservam ordem). Remotos durante writes são acumulados semanticamente, igualdade real do payload é distinguida de deferimento e remoto stale pode gerar um único write-back controlado. `syncQuotaGuard` permite no máximo 3 `writeSnapshot` reais por 60 segundos e reinicia por sessão; bloqueios não são acknowledged nem reentraiados. Os modos `?actusSyncMode=no-writes` e `?actusSyncMode=no-listeners` isolam listeners e writes. A arquitetura ainda não fornece CAS/revisão distribuída.
+- **Publicação versionada Firebase**: contas v2 escrevem revisões imutáveis em `users/{uid}/revisions/{revision}` e publicam somente `users/{uid}/manifest/current` via transaction/CAS. O reader v2 lê exatamente a revisão e os meses declarados pelo manifest, com um listener lógico do manifest. Contas sem manifest permanecem legíveis pelo formato legado e migram no primeiro publish; revisões antigas/órfãs não são apagadas no hot path.
 
 ## O que foi implementado (resumo — rodada mais recente: Sincronização Google)
 
@@ -107,6 +109,10 @@ O projeto base está completo e as features **Pomodoro**, **Quadro Kanban** e **
 - `npm run lint` — sem erros de tipo.
 - `npm run test:run` — 6 arquivos, **73 testes** passando.
 - `npm run build` — gerado com sucesso (chunk > 500 kB: aviso de tamanho, não é erro).
+
+### Próximo smoke controlado
+
+Não executar durante o BUILD. Usar no máximo 30–60 segundos por fase: `?actusSyncMode=no-writes` (listeners ativos, writes bloqueados), `?actusSyncMode=no-listeners` (listeners e writes bloqueados), URL normal sem interação com budget de 3 writes e, somente se estabilizar, uma alteração pequena. Copiar as linhas `[ACTUS_SYNC #...]` e parar no primeiro `QUOTA_GUARD_BLOCKED` ou segundo push inesperado.
 
 ## O que foi implementado (resumo — rodada mais recente: Quadro Kanban)
 

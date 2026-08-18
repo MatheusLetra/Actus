@@ -140,6 +140,20 @@ Após um incidente confirmado no Firebase Spark, com aproximadamente 42 mil leit
 
 `resource-exhausted` não inicia retry agressivo. Falhas deixam o estado não acknowledged para tentativa posterior por nova alteração, sincronização manual ou reconexão. Snapshots remotos semanticamente iguais ao estado local, acknowledged ou ao resultado já publicado não geram `importData()` nem write-back. A geração da sessão de autenticação invalida resultados tardios de sync após logout ou troca de usuário.
 
+### BUILD de diagnóstico temporário
+
+Antes de novo smoke Firebase, `syncDiagnostics` e `syncQuotaGuard` registram, somente em DEV, a sequência do fluxo, origem dos requests, watch id, hashes RAW/canonical e hashes separados de core, completions e Pomodoro. Nenhum conteúdo de usuário é logado. O quarto `writeSnapshot` em uma janela móvel de 60 segundos é bloqueado antes do Firestore; o payload não é confirmado nem reentraiado.
+
+Modos DEV-only: `?actusSyncMode=no-writes` mantém bootstrap/listeners e bloqueia writes; `?actusSyncMode=no-listeners` mantém bootstrap e bloqueia listeners/writes; sem parâmetro é o modo normal protegido por 3 writes. A serialização de comparação agora compartilha a política do Firestore para `undefined`/ausência, sem reordenar arrays. Snapshots diferentes recebidos durante um write são acumulados para reconciliação; snapshots iguais ao payload em escrita são apenas deferidos, e remoto stale pode ser republicado uma vez de forma controlada. Não há alteração de schema, paths, merge arquitetural, Rules ou arquitetura distribuída.
+
+### Publicação v2 por revisão
+
+O transporte Firebase v2 usa o manifest isolado `users/{uid}/manifest/current` e revisões imutáveis em `users/{uid}/revisions/{revision}`. Cada revisão contém um documento core e shards mensais com o mesmo `revision`; o manifest declara `currentRevision`, `previousRevision`, `publishedAt` e `shardMonths`. A publicação escreve todos os documentos da revisão primeiro e troca o manifest por transaction que exige `currentRevision === baseRevision`. Em conflito CAS, a revisão é abandonada, o estado publicado é relido, o merge é refeito e há limite defensivo de tentativas. O reader v2 observa somente o manifest e nunca faz scan de shards para descobrir meses.
+
+O reader legado continua atendendo contas sem `manifest/current`. O primeiro publish necessário cria a primeira revisão v2 sem deletar o core/shards legados. Clientes v1 posteriores podem continuar escrevendo o core legado, mas não alteram o manifest v2 e essas escritas não são incorporadas automaticamente.
+
+As Rules precisam permitir, para o mesmo `userId`, leitura e escrita de `manifest/current`, `revisions/{revision}` e suas subcoleções `completions/{month}` e `pomodoro/{month}`, mantendo a mesma condição de ownership usada no path legado. Não há arquivo de Rules versionado neste repositório; essa alteração deverá ser aplicada no Console antes do smoke v2.
+
 Essa contenção não altera o schema, os paths, os shards, as regras Firestore ou a política de merge. Revision, manifest e CAS continuam adiados.
 
 ## Segurança

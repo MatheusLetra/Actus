@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createPushCoordinator } from '../services/firebase/pushCoordinator';
+import { SyncQuotaGuardBlockedError } from '../services/firebase/syncQuotaGuard';
 
 function deferred() {
   let resolve!: () => void;
@@ -85,6 +86,23 @@ describe('pushCoordinator', () => {
     expect(coordinator.getState()).toEqual({ acknowledged: null, writing: null, pending: 'T2' });
   });
 
+  it('keeps a diagnostic quota block pending without acknowledging or retrying automatically', async () => {
+    let attempts = 0;
+    const coordinator = createPushCoordinator({
+      serialize: (value: string) => value,
+      write: async () => {
+        attempts += 1;
+        throw new SyncQuotaGuardBlockedError(4, 60_000);
+      },
+    });
+
+    coordinator.request('blocked');
+    await settle();
+
+    expect(attempts).toBe(1);
+    expect(coordinator.getState()).toEqual({ acknowledged: null, writing: null, pending: 'blocked' });
+  });
+
   it('ignores a request equal to the acknowledged payload', async () => {
     let attempts = 0;
     const coordinator = createPushCoordinator({
@@ -98,6 +116,21 @@ describe('pushCoordinator', () => {
     await settle();
 
     expect(attempts).toBe(1);
+    expect(coordinator.getState()).toEqual({ acknowledged: 'T1', writing: null, pending: null });
+  });
+
+  it('can explicitly republish an acknowledged payload for controlled stale recovery', async () => {
+    const writes: string[] = [];
+    const coordinator = createPushCoordinator({
+      serialize: (value: string) => value,
+      write: async (value: string) => { writes.push(value); },
+    });
+
+    coordinator.acknowledge('T1');
+    coordinator.request('T1', { source: 'remote_writeback', forceAcknowledged: true });
+    await settle();
+
+    expect(writes).toEqual(['T1']);
     expect(coordinator.getState()).toEqual({ acknowledged: 'T1', writing: null, pending: null });
   });
 

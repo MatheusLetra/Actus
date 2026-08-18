@@ -14,6 +14,7 @@ import type {
 import { kanbanService } from './kanbanService';
 import { pomodoroService } from './pomodoroService';
 import { projectService } from './projectService';
+import { stableSerialize } from './firebase/snapshotSerialization';
 
 export interface ActusData {
   version: number;
@@ -295,7 +296,7 @@ export const syncMergeService = {
   },
 
   dataEquals(a: ActusData, b: ActusData): boolean {
-    return JSON.stringify(a) === JSON.stringify(b);
+    return stableSerialize(a) === stableSerialize(b);
   },
 
   mergeSnapshots(local: ActusSnapshot | null, remote: ActusSnapshot | null): ActusSnapshot | null {
